@@ -1,6 +1,10 @@
 [package]
 name = "slicer"
 version = "0.1.0"
-authors = ["terre"]
+authors = ["Terrence Cole"]
 
 [dependencies]
+approx = "^0.1.1"
+error-chain = "^0.7"
+nalgebra = "^0.9"
+nom = "^2.0"
