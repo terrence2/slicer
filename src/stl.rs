@@ -150,7 +150,7 @@ mod test {
 
     #[test]
     fn test_read_scad() {
-        let mut fp = File::open("test_data/cube_scad.stl").unwrap();
+        let mut fp = File::open("test_data/single_color/cube_scad.stl").unwrap();
         let m = super::StlMesh::from_file(&mut fp).unwrap();
         assert_eq!(m.tris.len(), 12);
         assert_eq!(m.radius(), 3f32.sqrt());
@@ -158,7 +158,7 @@ mod test {
 
     #[test]
     fn test_read_bin() {
-        let mut fp = File::open("test_data/cube_bin.stl").unwrap();
+        let mut fp = File::open("test_data/single_color/cube_bin.stl").unwrap();
         let m = super::StlMesh::from_file(&mut fp).unwrap();
         assert_eq!(m.tris.len(), 12);
         assert_eq!(m.radius(), 3f32.sqrt());
@@ -166,7 +166,7 @@ mod test {
 
     #[test]
     fn test_read_text() {
-        let mut fp = File::open("test_data/cube_text.stl").unwrap();
+        let mut fp = File::open("test_data/single_color/cube_text.stl").unwrap();
         let m = super::StlMesh::from_file(&mut fp).unwrap();
         assert_eq!(m.tris.len(), 12);
         assert_eq!(m.radius(), 3f32.sqrt());
