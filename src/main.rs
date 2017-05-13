@@ -5,6 +5,7 @@
 extern crate nalgebra;
 
 mod errors { error_chain! {} }
+mod geometry;
 mod mesh;
 mod stl;
 
@@ -24,7 +25,10 @@ fn run() -> Result<()> {
     );
     let matches = parser.get_matches();
 
+    // Clap ensures that there is at least one INPUT value to unwrap.
     let filenames = matches.values_of("INPUT").unwrap().collect::<Vec<&str>>();
+
+    // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
     let mut meshes = Vec::<Mesh>::new();
     for (i, filename) in filenames.iter().enumerate() {
         let mut fp = File::open(filename)
@@ -35,8 +39,12 @@ fn run() -> Result<()> {
             .chain_err(|| format!("failed to reify mesh: {}", filename))?;
         meshes.push(mesh);
     }
+
+    // Union all meshes, preserving the face tags.
     let mut mesh = meshes.pop().unwrap();
-    mesh = meshes.iter().fold(mesh, |acc, v| acc.merge(v));
+    for other in meshes.iter() {
+        mesh = mesh.union_non_overlapping(other).chain_err(|| "failed to merge mesh")?;
+    }
 
     println!("  Verts: {}", mesh.verts.len());
     println!("  Norms: {}", mesh.normals.len());

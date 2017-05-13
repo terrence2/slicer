@@ -1,11 +1,21 @@
-use stl::StlMesh;
+mod errors { error_chain! {} }
+
 use errors::{Result};
+use geometry::Plane;
 use nalgebra::Point3;
+use stl::StlMesh;
 
 pub struct Triangle {
     pub verts: [u32; 3],
     pub normal: u32,
     pub tag: u8,
+}
+
+impl Triangle {
+    fn vert(&self, mesh: &Mesh, i: usize) -> Point3<f32> {
+        let index = self.verts[i] as usize;
+        return mesh.verts[index];
+    }
 }
 
 pub struct Mesh {
@@ -52,14 +62,21 @@ impl Mesh {
         return Ok(mesh);
     }
 
-    pub fn merge(mut self, other: &Mesh) -> Mesh {
+    /// Import the vertices and faces of `other` into this mesh, cutting out co-planar, intersecting
+    /// faces to result in the minimal mesh. Note: this is not a CSG union: the meshes must be non-
+    /// interpenetrating.
+    pub fn union_non_overlapping(mut self, other: &Mesh) -> Result<Mesh> {
         for tri0 in self.tris.iter() {
+            let pi0 = Plane::from_triangle(&tri0.vert(&self, 0), &tri0.vert(&self, 1), &tri0.vert(&self, 2));
             for tri1 in other.tris.iter() {
-                
-
+                if relative_eq!(pi0.distance_to(&tri1.vert(&other, 0)), 0.0f32) &&
+                   relative_eq!(pi0.distance_to(&tri1.vert(&other, 1)), 0.0f32) &&
+                   relative_eq!(pi0.distance_to(&tri1.vert(&other, 2)), 0.0f32) {
+                    // Co-planar
+                }
             }
         }
-        self
+        bail!("not implemented")
     }
 }
 

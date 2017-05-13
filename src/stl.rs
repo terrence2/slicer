@@ -1,4 +1,4 @@
-use nalgebra::{FloatPoint, Origin, Point3};
+use nalgebra::{distance, Point3};
 use nom::{le_u16, le_u32, le_f32, space, multispace};
 use std::f32;
 use std::fs::File;
@@ -132,9 +132,9 @@ impl StlMesh {
         let mut r = 1.0f32;
         for tri in self.tris.iter() {
             r = max4(r,
-                     tri.verts[0].distance(&Point3::origin()),
-                     tri.verts[1].distance(&Point3::origin()),
-                     tri.verts[2].distance(&Point3::origin()));
+                     distance(&tri.verts[0], &Point3::origin()),
+                     distance(&tri.verts[1], &Point3::origin()),
+                     distance(&tri.verts[2], &Point3::origin()));
         }
         return r;
     }
