@@ -8,6 +8,7 @@ mod errors { error_chain! {} }
 mod mesh;
 mod stl;
 
+use mesh::Mesh;
 use std::fs::File;
 use std::io::Read;
 use stl::StlMesh;
@@ -24,13 +25,14 @@ fn run() -> Result<()> {
     let matches = parser.get_matches();
 
     let filenames = matches.values_of("INPUT").unwrap().collect::<Vec<&str>>();
-    for filename in filenames {
-        let mut fp = File::open(filename).chain_err(|| "failed to open source files")?;
-        let stl = StlMesh::from_file(&mut fp).chain_err(|| "failed to load stl file")?;
+    for (i, filename) in filenames.iter().enumerate() {
+        let mut fp = File::open(filename)
+            .chain_err(|| format!("failed to open source file: {}", filename))?;
+        let stl = StlMesh::from_file(&mut fp)
+            .chain_err(|| "failed to load stl file")?;
+        let mesh = Mesh::from_stl(stl)
+            .chain_err(|| format!("failed to reify mesh: {}", filename))?;
     }
 
-    //let foo = m.intersect_plane();
-
-    println!("Hello, world!");
     Ok(())
 }

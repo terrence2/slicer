@@ -2,12 +2,12 @@ use stl::StlMesh;
 use errors::{Result};
 use nalgebra::Point3;
 
-struct Triangle {
+pub struct Triangle {
     pub verts: [u32; 3],
     pub normal: u32,
 }
 
-struct Mesh {
+pub struct Mesh {
     pub verts: Vec<Point3<f32>>,
     pub normals: Vec<Point3<f32>>,
     pub tris: Vec<Triangle>,
@@ -30,7 +30,7 @@ fn relative_eq(p0: &Point3<f32>, p1: &Point3<f32>) -> bool {
 }
 
 impl Mesh {
-    fn from_stl(stl: StlMesh) -> Result<Mesh> {
+    pub fn from_stl(stl: StlMesh) -> Result<Mesh> {
         let mut mesh = Mesh {
             verts: Vec::new(),
             normals: Vec::new(),
