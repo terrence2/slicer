@@ -86,10 +86,10 @@ mod test {
     use std::fs::File;
 
     #[test]
-    fn test_use_it() {
+    fn test_simplify_mesh() {
         let mut fp = File::open("test_data/cube_scad.stl").unwrap();
         let stl = super::StlMesh::from_file(&mut fp).unwrap();
-        let m = super::Mesh::from_stl(stl).unwrap();
+        let m = super::Mesh::from_stl(stl, 0).unwrap();
         assert_eq!(m.normals.len(), 6);
         assert_eq!(m.verts.len(), 8);
         assert_eq!(m.tris.len(), 12);

@@ -23,3 +23,19 @@ impl Plane {
         self.normal.dot(&p.coords) + self.d
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::fs::File;
+
+    #[test]
+    fn test_plane_distance() {
+        let p0 = Point3::new(0f32, 0f32, 0f32);
+        let p1 = Point3::new(1f32, 0f32, 0f32);
+        let p2 = Point3::new(0f32, 1f32, 0f32);
+        let plane = Plane::from_triangle(&p0, &p1, &p2);
+        let p = Point3::new(0f32, 0f32, 1f32);
+        assert_eq!(1.0f32, plane.distance_to(&p));
+    }
+}
