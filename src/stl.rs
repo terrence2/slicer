@@ -5,28 +5,28 @@ use std::fs::File;
 use std::io::Read;
 use std::str;
 
-mod errors { error_chain! {} }
+mod errors {
+    error_chain!{}
+}
 use errors::{Result, ResultExt};
 
 #[derive(Debug)]
 pub struct StlTriangle {
     pub verts: [Point3<f32>; 3],
-    pub normal: Point3<f32>
+    pub normal: Point3<f32>,
 }
 impl StlTriangle {
-    pub fn new(v0: Point3<f32>,
-               v1: Point3<f32>,
-               v2: Point3<f32>,
-               norm: Point3<f32>) -> Self
-    {
+    pub fn new(v0: Point3<f32>, v1: Point3<f32>, v2: Point3<f32>, norm: Point3<f32>) -> Self {
         StlTriangle {
             verts: [v0, v1, v2],
-            normal: norm
+            normal: norm,
         }
     }
 }
 
-fn is_newline(c: u8) -> bool { c == '\n' as u8 }
+fn is_newline(c: u8) -> bool {
+    c == '\n' as u8
+}
 
 fn is_multispace(c: u8) -> bool {
     for s in [' ', '\t', '\n', '\r'].into_iter() {
@@ -102,16 +102,20 @@ named!(parse_binary_stl <&[u8], StlMesh>, do_parse!(
 
 fn max4(a: f32, b: f32, c: f32, d: f32) -> f32 {
     let mut m = a;
-    if b > m { m = b; }
-    else if c > m { m = c; }
-    else if d > m { m = d; }
+    if b > m {
+        m = b;
+    } else if c > m {
+        m = c;
+    } else if d > m {
+        m = d;
+    }
     return m;
 }
 
 #[derive(Debug)]
 pub struct StlMesh {
     pub name: String,
-    pub tris: Vec<StlTriangle>
+    pub tris: Vec<StlTriangle>,
 }
 
 impl StlMesh {

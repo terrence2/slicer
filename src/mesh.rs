@@ -1,6 +1,8 @@
-mod errors { error_chain! {} }
+mod errors {
+    error_chain!{}
+}
 
-use errors::{Result};
+use errors::Result;
 use geometry::Plane;
 use nalgebra::Point3;
 use stl::StlMesh;
@@ -35,9 +37,7 @@ fn push_unique_point(points: &mut Vec<Point3<f32>>, point: Point3<f32>) -> u32 {
 }
 
 fn relative_eq(p0: &Point3<f32>, p1: &Point3<f32>) -> bool {
-    return relative_eq!(p0.x, p1.x) &&
-           relative_eq!(p0.y, p1.y) &&
-           relative_eq!(p0.z, p1.z);
+    return relative_eq!(p0.x, p1.x) && relative_eq!(p0.y, p1.y) && relative_eq!(p0.z, p1.z);
 }
 
 impl Mesh {
@@ -45,16 +45,14 @@ impl Mesh {
         let mut mesh = Mesh {
             verts: Vec::new(),
             normals: Vec::new(),
-            tris: Vec::new()
+            tris: Vec::new(),
         };
         for stl_tri in stl.tris {
             let tri = Triangle {
                 normal: push_unique_point(&mut mesh.normals, stl_tri.normal),
-                verts: [
-                    push_unique_point(&mut mesh.verts, stl_tri.verts[0]),
-                    push_unique_point(&mut mesh.verts, stl_tri.verts[1]),
-                    push_unique_point(&mut mesh.verts, stl_tri.verts[2]),
-                ],
+                verts: [push_unique_point(&mut mesh.verts, stl_tri.verts[0]),
+                        push_unique_point(&mut mesh.verts, stl_tri.verts[1]),
+                        push_unique_point(&mut mesh.verts, stl_tri.verts[2])],
                 tag: tag,
             };
             mesh.tris.push(tri);
@@ -67,7 +65,9 @@ impl Mesh {
     /// interpenetrating.
     pub fn union_non_overlapping(mut self, other: &Mesh) -> Result<Mesh> {
         for tri0 in self.tris.iter() {
-            let pi0 = Plane::from_triangle(&tri0.vert(&self, 0), &tri0.vert(&self, 1), &tri0.vert(&self, 2));
+            let pi0 = Plane::from_triangle(&tri0.vert(&self, 0),
+                                           &tri0.vert(&self, 1),
+                                           &tri0.vert(&self, 2));
             for tri1 in other.tris.iter() {
                 if relative_eq!(pi0.distance_to(&tri1.vert(&other, 0)), 0.0f32) &&
                    relative_eq!(pi0.distance_to(&tri1.vert(&other, 1)), 0.0f32) &&

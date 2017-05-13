@@ -1,4 +1,6 @@
-mod errors { error_chain! {} }
+mod errors {
+    error_chain!{}
+}
 
 use errors::{Result, ResultExt};
 use nalgebra::{Point3, Vector3};

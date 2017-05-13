@@ -1,10 +1,16 @@
-#[macro_use] extern crate approx;
-#[macro_use] extern crate clap;
-#[macro_use] extern crate error_chain;
-#[macro_use] extern crate nom;
+#[macro_use]
+extern crate approx;
+#[macro_use]
+extern crate clap;
+#[macro_use]
+extern crate error_chain;
+#[macro_use]
+extern crate nom;
 extern crate nalgebra;
 
-mod errors { error_chain! {} }
+mod errors {
+    error_chain!{}
+}
 mod geometry;
 mod mesh;
 mod stl;
@@ -26,7 +32,10 @@ fn run() -> Result<()> {
     let matches = parser.get_matches();
 
     // Clap ensures that there is at least one INPUT value to unwrap.
-    let filenames = matches.values_of("INPUT").unwrap().collect::<Vec<&str>>();
+    let filenames = matches
+        .values_of("INPUT")
+        .unwrap()
+        .collect::<Vec<&str>>();
 
     // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
     let mut meshes = Vec::<Mesh>::new();
@@ -43,7 +52,8 @@ fn run() -> Result<()> {
     // Union all meshes, preserving the face tags.
     let mut mesh = meshes.pop().unwrap();
     for other in meshes.iter() {
-        mesh = mesh.union_non_overlapping(other).chain_err(|| "failed to merge mesh")?;
+        mesh = mesh.union_non_overlapping(other)
+            .chain_err(|| "failed to merge mesh")?;
     }
 
     println!("  Verts: {}", mesh.verts.len());
