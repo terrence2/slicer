@@ -51,6 +51,16 @@ impl Mesh {
         }
         return Ok(mesh);
     }
+
+    pub fn merge(mut self, other: &Mesh) -> Mesh {
+        for tri0 in self.tris.iter() {
+            for tri1 in other.tris.iter() {
+                
+
+            }
+        }
+        self
+    }
 }
 
 #[cfg(test)]

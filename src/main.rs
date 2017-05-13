@@ -25,6 +25,7 @@ fn run() -> Result<()> {
     let matches = parser.get_matches();
 
     let filenames = matches.values_of("INPUT").unwrap().collect::<Vec<&str>>();
+    let mut meshes = Vec::<Mesh>::new();
     for (i, filename) in filenames.iter().enumerate() {
         let mut fp = File::open(filename)
             .chain_err(|| format!("failed to open source file: {}", filename))?;
@@ -32,7 +33,12 @@ fn run() -> Result<()> {
             .chain_err(|| "failed to load stl file")?;
         let mesh = Mesh::from_stl(stl, i as u8)
             .chain_err(|| format!("failed to reify mesh: {}", filename))?;
+        meshes.push(mesh);
     }
+    let mut mesh = meshes.pop().unwrap();
+    mesh = meshes.iter().fold(mesh, |acc, v| acc.merge(v));
 
+    println!("  Verts: {}", mesh.verts.len());
+    println!("  Norms: {}", mesh.normals.len());
     Ok(())
 }
