@@ -30,7 +30,7 @@ fn run() -> Result<()> {
             .chain_err(|| format!("failed to open source file: {}", filename))?;
         let stl = StlMesh::from_file(&mut fp)
             .chain_err(|| "failed to load stl file")?;
-        let mesh = Mesh::from_stl(stl)
+        let mesh = Mesh::from_stl(stl, i as u8)
             .chain_err(|| format!("failed to reify mesh: {}", filename))?;
     }
 

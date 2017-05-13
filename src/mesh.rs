@@ -5,6 +5,7 @@ use nalgebra::Point3;
 pub struct Triangle {
     pub verts: [u32; 3],
     pub normal: u32,
+    pub tag: u8,
 }
 
 pub struct Mesh {
@@ -30,7 +31,7 @@ fn relative_eq(p0: &Point3<f32>, p1: &Point3<f32>) -> bool {
 }
 
 impl Mesh {
-    pub fn from_stl(stl: StlMesh) -> Result<Mesh> {
+    pub fn from_stl(stl: StlMesh, tag: u8) -> Result<Mesh> {
         let mut mesh = Mesh {
             verts: Vec::new(),
             normals: Vec::new(),
@@ -44,6 +45,7 @@ impl Mesh {
                     push_unique_point(&mut mesh.verts, stl_tri.verts[1]),
                     push_unique_point(&mut mesh.verts, stl_tri.verts[2]),
                 ],
+                tag: tag,
             };
             mesh.tris.push(tri);
         }
