@@ -19,7 +19,7 @@ pub struct Plane {
 }
 
 impl Plane {
-    pub fn from_triangle(p0: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>) -> Self {
+    pub fn from_vertices(p0: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>) -> Self {
         let nv = (*p1 - *p0).cross(&(*p2 - *p0));
         Plane {
             normal: nv,
@@ -27,11 +27,16 @@ impl Plane {
         }
     }
 
+    pub fn from_triangle(tri: &Triangle) -> Self {
+        Self::from_vertices(&tri.verts[0], &tri.verts[1], &tri.verts[2])
+    }
+
     pub fn distance_to(&self, p: &Point3<f32>) -> f32 {
         self.normal.dot(&p.coords) + self.d
     }
 }
 
+#[derive(Debug)]
 pub struct Triangle {
     verts: [Point3<f32>; 3],
 }
@@ -46,6 +51,14 @@ pub struct PointIntersection {
 impl Triangle {
     pub fn new(p0: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>) -> Triangle {
         Triangle { verts: [p0.clone(), p1.clone(), p2.clone()] }
+    }
+
+    /// Make the face point the other direction.
+    pub fn invert(mut self) -> Self {
+        let t = self.verts[0];
+        self.verts[0] = self.verts[2];
+        self.verts[2] = t;
+        return self;
     }
 
     pub fn intersect_with_point(&self, p: &Point3<f32>) -> PointIntersection {
@@ -75,16 +88,25 @@ impl Triangle {
             out.distance = 0f32;
             out.nearest_point_in = p.clone();
         }
-        println!("OUT: {:?}", out);
         return out;
     }
 
-    pub fn clip_with(&mut self, clip: &Triangle) {
+    /// Note: `self` and `other` _MUST_ be coplanar.
+    pub fn clip_with(&self, clip: &Triangle) {
         // Check if all points in clip are inside self.
         //   foreach vert in clip, add edge to two nearest verts in self.
-        for clip_vert in clip.verts.iter() {
-            let _ = self.intersect_with_point(clip_vert);
+        let vert_intersections = clip.verts.iter()
+            .map(|v| self.intersect_with_point(v))
+            .collect::<Vec<PointIntersection>>();
+
+        if vert_intersections.iter().all(|int| int.intersects) {
+            println!("Need to remove HOLE");
+            return;
         }
+        if !vert_intersections.iter().any(|int| int.intersects) {
+            println!("Not overlapping");
+        }
+        println!("Do normal intersection.")
     }
 }
 
@@ -97,7 +119,7 @@ mod test {
         let p0 = Point3::new(0f32, 0f32, 0f32);
         let p1 = Point3::new(1f32, 0f32, 0f32);
         let p2 = Point3::new(0f32, 1f32, 0f32);
-        let plane = Plane::from_triangle(&p0, &p1, &p2);
+        let plane = Plane::from_vertices(&p0, &p1, &p2);
         let p = Point3::new(0f32, 0f32, 1f32);
         assert_eq!(1.0f32, plane.distance_to(&p));
     }
@@ -122,15 +144,47 @@ mod test {
         let tri = Triangle::new(&Point3::new(0f32, 0f32, 0f32),
                                 &Point3::new(0f32, 1f32, 0f32),
                                 &Point3::new(1f32, 0f32, 0f32));
+        // Trivial case.
         assert_point_inside_tri(&tri, &Point3::new(0.1f32, 0.1f32, 0f32));
+        // Edge cases.
         assert_point_inside_tri(&tri, &Point3::new(0.5f32, 0f32, 0f32));
         assert_point_inside_tri(&tri, &Point3::new(0f32, 0.5f32, 0f32));
+        // Corner cases.
         assert_point_inside_tri(&tri, &Point3::new(0f32, 0f32, 0f32));
         assert_point_inside_tri(&tri, &Point3::new(1f32, 0f32, 0f32));
         assert_point_inside_tri(&tri, &Point3::new(0f32, 1f32, 0f32));
 
+        // This does not test for planality so this is really inside the
+        // rectangular prism with the given layout.
+        assert_point_inside_tri(&tri, &Point3::new(0.1f32, 0.1f32, 10f32));
+        assert_point_inside_tri(&tri, &Point3::new(0.1f32, 0.1f32, -10f32));
+
+        // Negative cases.
         assert_point_outside_tri(&tri,
                                  &Point3::new(-1f32, 0.5f32, 0f32),
                                  &Point3::new(0f32, 0.5f32, 0f32));
+        assert_point_outside_tri(&tri,
+                                 &Point3::new(0.5f32, -1f32, 0f32),
+                                 &Point3::new(0.5f32, 0f32, 0f32));
+        assert_point_outside_tri(&tri,
+                                 &Point3::new(-1f32, -1f32, 0f32),
+                                 &Point3::new(0f32, 0f32, 0f32));
+        assert_point_outside_tri(&tri,
+                                 &Point3::new(1f32, 1f32, 0f32),
+                                 &Point3::new(0.5f32, 0.5f32, 0f32));
+    }
+
+    #[test]
+    fn real_world_failure() {
+        let tri0 = Triangle::new(
+            &Point3::new(0.0000000000000000683346f32, 0.433013f32, -0.25f32),
+            &Point3::new(-0.0000000000000000377194f32, -0.433013f32, -0.25f32),
+            &Point3::new(-0.0000000000000000306152f32, 0.00000000000000000000000000000000374915f32, 0.5f32),
+        );
+        let tri1 = Triangle::new(
+            &Point3::new(0.0000000000000000612303f32, 0f32, 1f32),
+            &Point3::new(-0.0000000000000000306152f32, 0.866025f32, -0.5f32),
+            &Point3::new(-0.0000000000000000306152f32, -0.866025f32, -0.5f32),
+        );
     }
 }

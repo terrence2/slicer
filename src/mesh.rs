@@ -3,7 +3,7 @@ mod errors {
 }
 
 use errors::Result;
-use geometry::Plane;
+use geometry as geo;
 use nalgebra::Point3;
 use stl::StlMesh;
 
@@ -18,6 +18,13 @@ impl Triangle {
     fn vert(&self, mesh: &Mesh, i: usize) -> Point3<f32> {
         let index = self.verts[i] as usize;
         return mesh.verts[index];
+    }
+
+    /// Extract vertex data from the mesh for fast local access for geometry tests.
+    fn as_geometry(&self, mesh: &Mesh) -> geo::Triangle {
+        geo::Triangle::new(&self.vert(mesh, 0),
+                           &self.vert(mesh, 1),
+                           &self.vert(mesh, 2))
     }
 }
 
@@ -65,16 +72,17 @@ impl Mesh {
     /// faces to result in the minimal mesh. Note: this is not a CSG union: the meshes must be non-
     /// interpenetrating.
     pub fn union_non_overlapping(&self, other: &Mesh) -> Result<Mesh> {
-        for tri0 in self.tris.iter() {
-            let pi0 = Plane::from_triangle(&tri0.vert(self, 0),
-                                           &tri0.vert(self, 1),
-                                           &tri0.vert(self, 2));
-            for tri1 in other.tris.iter() {
-                if relative_eq!(pi0.distance_to(&tri1.vert(&other, 0)), 0.0f32) &&
-                   relative_eq!(pi0.distance_to(&tri1.vert(&other, 1)), 0.0f32) &&
-                   relative_eq!(pi0.distance_to(&tri1.vert(&other, 2)), 0.0f32) {
+        for mesh_tri0 in self.tris.iter() {
+            let geo_tri0 = mesh_tri0.as_geometry(&self);
+            let pi0 = geo::Plane::from_triangle(&geo_tri0);
+            for mesh_tri1 in other.tris.iter() {
+                if relative_eq!(pi0.distance_to(&mesh_tri1.vert(other, 0)), 0.0f32) &&
+                   relative_eq!(pi0.distance_to(&mesh_tri1.vert(other, 1)), 0.0f32) &&
+                   relative_eq!(pi0.distance_to(&mesh_tri1.vert(other, 2)), 0.0f32) {
                     // Co-planar
-                    println!("Found coplanar faces: {:?} and {:?}", tri0, tri1);
+                    let geo_tri1 = mesh_tri1.as_geometry(other).invert();
+                    println!("Found coplanar faces: {:?} and {:?}", geo_tri0, geo_tri1);
+                    let next_tri0 = geo_tri0.clip_with(&geo_tri1);
                     // Remove tri0 an tri1.
                     // Subtract tri1 from tri0 and re-insert all resulting tris into mesh0.
                     // Subtract tri0 from tri1 and re-insert all resulting tris into mesh1.
