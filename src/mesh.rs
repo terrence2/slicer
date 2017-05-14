@@ -7,6 +7,7 @@ use geometry::Plane;
 use nalgebra::Point3;
 use stl::StlMesh;
 
+#[derive(Debug)]
 pub struct Triangle {
     pub verts: [u32; 3],
     pub normal: u32,
@@ -63,16 +64,20 @@ impl Mesh {
     /// Import the vertices and faces of `other` into this mesh, cutting out co-planar, intersecting
     /// faces to result in the minimal mesh. Note: this is not a CSG union: the meshes must be non-
     /// interpenetrating.
-    pub fn union_non_overlapping(mut self, other: &Mesh) -> Result<Mesh> {
+    pub fn union_non_overlapping(&self, other: &Mesh) -> Result<Mesh> {
         for tri0 in self.tris.iter() {
-            let pi0 = Plane::from_triangle(&tri0.vert(&self, 0),
-                                           &tri0.vert(&self, 1),
-                                           &tri0.vert(&self, 2));
+            let pi0 = Plane::from_triangle(&tri0.vert(self, 0),
+                                           &tri0.vert(self, 1),
+                                           &tri0.vert(self, 2));
             for tri1 in other.tris.iter() {
                 if relative_eq!(pi0.distance_to(&tri1.vert(&other, 0)), 0.0f32) &&
                    relative_eq!(pi0.distance_to(&tri1.vert(&other, 1)), 0.0f32) &&
                    relative_eq!(pi0.distance_to(&tri1.vert(&other, 2)), 0.0f32) {
                     // Co-planar
+                    println!("Found coplanar faces: {:?} and {:?}", tri0, tri1);
+                    // Remove tri0 an tri1.
+                    // Subtract tri1 from tri0 and re-insert all resulting tris into mesh0.
+                    // Subtract tri0 from tri1 and re-insert all resulting tris into mesh1.
                 }
             }
         }
@@ -82,7 +87,7 @@ impl Mesh {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    use super::Mesh;
     use std::fs::File;
 
     #[test]
@@ -93,5 +98,18 @@ mod test {
         assert_eq!(m.normals.len(), 6);
         assert_eq!(m.verts.len(), 8);
         assert_eq!(m.tris.len(), 12);
+    }
+
+    fn load_mesh(filename: &str, tag: u8) -> Mesh {
+        let mut fp = File::open(filename).unwrap();
+        let stl = super::StlMesh::from_file(&mut fp).unwrap();
+        return Mesh::from_stl(stl, tag).unwrap();
+    }
+
+    #[test]
+    fn test_union_nesting() {
+        let m0 = load_mesh("test_data/2color/nesting/0.stl", 0);
+        let m1 = load_mesh("test_data/2color/nesting/1.stl", 1);
+        let _ = m0.union_non_overlapping(&m1);
     }
 }

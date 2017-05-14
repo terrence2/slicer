@@ -17,7 +17,6 @@ mod stl;
 
 use mesh::Mesh;
 use std::fs::File;
-use std::io::Read;
 use stl::StlMesh;
 use errors::{Result, ResultExt};
 
