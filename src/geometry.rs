@@ -13,6 +13,7 @@ pub fn max_f32(a: f32, b: f32) -> f32 {
     if a > b { a } else { b }
 }
 
+#[derive(Clone)]
 pub struct Plane {
     normal: Vector3<f32>,
     d: f32,
@@ -79,7 +80,8 @@ impl Triangle {
             if dist < out.distance {
                 out.distance = dist;
                 let norm = (b - a).cross(&(p - a));
-                out.intersects = norm.z <= 0f32 && relative_eq!(t, t_clamp);
+                out.intersects = (norm.z < 0f32 || relative_eq!(norm.z, 0f32)) &&
+                                 relative_eq!(t, t_clamp);
                 out.nearest_point_in = nearest;
             }
         }
@@ -95,9 +97,14 @@ impl Triangle {
     pub fn clip_with(&self, clip: &Triangle) {
         // Check if all points in clip are inside self.
         //   foreach vert in clip, add edge to two nearest verts in self.
-        let vert_intersections = clip.verts.iter()
+        let vert_intersections = clip.verts
+            .iter()
             .map(|v| self.intersect_with_point(v))
             .collect::<Vec<PointIntersection>>();
+
+        for int in vert_intersections.iter() {
+            println!("intersects: {}", int.intersects);
+        }
 
         if vert_intersections.iter().all(|int| int.intersects) {
             println!("Need to remove HOLE");
@@ -176,15 +183,25 @@ mod test {
 
     #[test]
     fn real_world_failure() {
-        let tri0 = Triangle::new(
-            &Point3::new(0.0000000000000000683346f32, 0.433013f32, -0.25f32),
-            &Point3::new(-0.0000000000000000377194f32, -0.433013f32, -0.25f32),
-            &Point3::new(-0.0000000000000000306152f32, 0.00000000000000000000000000000000374915f32, 0.5f32),
-        );
-        let tri1 = Triangle::new(
-            &Point3::new(0.0000000000000000612303f32, 0f32, 1f32),
-            &Point3::new(-0.0000000000000000306152f32, 0.866025f32, -0.5f32),
-            &Point3::new(-0.0000000000000000306152f32, -0.866025f32, -0.5f32),
-        );
+        let tri_inner =
+            Triangle::new(&Point3::new(0.0000000000000000683346f32, 0.433013f32, -0.25f32),
+                          &Point3::new(-0.0000000000000000377194f32, -0.433013f32, -0.25f32),
+                          &Point3::new(-0.0000000000000000306152f32,
+                                       0.00000000000000000000000000000000374915f32,
+                                       0.5f32));
+        let tri_outer =
+            Triangle::new(&Point3::new(0.0000000000000000612303f32, 0f32, 1f32),
+                          &Point3::new(-0.0000000000000000306152f32, 0.866025f32, -0.5f32),
+                          &Point3::new(-0.0000000000000000306152f32, -0.866025f32, -0.5f32));
+        assert!(tri_outer
+                    .intersect_with_point(&tri_inner.verts[0])
+                    .intersects);
+        assert!(tri_outer
+                    .intersect_with_point(&tri_inner.verts[1])
+                    .intersects);
+        assert!(tri_outer
+                    .intersect_with_point(&tri_inner.verts[2])
+                    .intersects);
+        let outer_inner = tri_outer.clip_with(&tri_inner);
     }
 }

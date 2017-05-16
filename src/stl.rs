@@ -2,7 +2,7 @@ use nalgebra::{distance, Point3};
 use nom::{le_u16, le_u32, le_f32, space, multispace};
 use std::f32;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::str;
 
 mod errors {
@@ -130,6 +130,42 @@ impl StlMesh {
 
         let (_, mesh) = parse_binary_stl(&s).unwrap();
         return Ok(mesh);
+    }
+
+    pub fn from_tris(name: &str, tris: Vec<StlTriangle>) -> Self {
+        StlMesh {
+            name: name.to_owned(),
+            tris: tris,
+        }
+    }
+
+    pub fn to_file(&self, fp: &mut File) -> Result<()> {
+        let mut buf = format!("solid {}\n", self.name);
+        for tri in self.tris.iter() {
+            buf += &format!("  facet normal {} {} {}\n",
+                    tri.normal[0],
+                    tri.normal[1],
+                    tri.normal[2]);
+            buf += &format!("    outer loop\n");
+            buf += &format!("      verts {} {} {}\n",
+                    tri.verts[0][0],
+                    tri.verts[0][1],
+                    tri.verts[0][2]);
+            buf += &format!("      verts {} {} {}\n",
+                    tri.verts[1][0],
+                    tri.verts[1][1],
+                    tri.verts[1][2]);
+            buf += &format!("      verts {} {} {}\n",
+                    tri.verts[2][0],
+                    tri.verts[2][1],
+                    tri.verts[2][2]);
+            buf += &format!("    end loop\n");
+            buf += &format!("  end facet\n");
+        }
+        buf += "end solid";
+        fp.write_all(buf.into_bytes().as_slice())
+            .chain_err(|| "failed to write")?;
+        return Ok(());
     }
 
     pub fn radius(&self) -> f32 {
