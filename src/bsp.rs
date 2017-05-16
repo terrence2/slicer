@@ -269,14 +269,14 @@ pub struct BspNodeId {
 
 impl BspTree {
     pub fn new() -> Self {
-        BspTree { nodes: Vec::new() }
+        let mut tree = BspTree { nodes: Vec::new() };
+        tree.create_node();
+        return tree;
     }
 
-    pub fn get_root(&mut self) -> BspNodeId {
-        return match self.nodes.is_empty() {
-                   true => self.create_node(),
-                   false => BspNodeId { index: 0 },
-               };
+    pub fn get_root(&self) -> BspNodeId {
+        assert!(!self.nodes.is_empty());
+        return BspNodeId { index: 0 };
     }
 
     pub fn invert(&mut self) {
@@ -303,7 +303,7 @@ impl BspTree {
         return polys;
     }
 
-    pub fn get_polygons(&mut self) -> Vec<ConvexPolygon> {
+    pub fn get_polygons(&self) -> Vec<ConvexPolygon> {
         let mut out = Vec::new();
         self.get_root().get_polygons(&mut out, self);
         return out;
@@ -327,6 +327,22 @@ impl BspTree {
 }
 
 impl BspNodeId {
+    pub fn get_polygons(&self, polygons: &mut Vec<ConvexPolygon>, arena: &BspTree) {
+        {
+            let self_borrow = arena.nodes.get(self.index).expect("unknown id");
+            let mut tmp = self_borrow.polygons.clone();
+            polygons.append(&mut tmp);
+        }
+
+        let (front_nodeid_opt, back_nodeid_opt) = self.get_front_and_back(arena);
+        if let Some(front_nodeid) = front_nodeid_opt {
+            front_nodeid.get_polygons(polygons, arena);
+        }
+        if let Some(back_nodeid) = back_nodeid_opt {
+            back_nodeid.get_polygons(polygons, arena);
+        }
+    }
+
     pub fn invert(&self, arena: &mut BspTree) {
         {
             let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
@@ -338,18 +354,7 @@ impl BspNodeId {
             }
         }
 
-        // Borrow self to recurse.
-        let mut front_nodeid_opt = None;
-        let mut back_nodeid_opt = None;
-        {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            if let Some(f) = self_borrow.front.as_ref() {
-                front_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-            if let Some(f) = self_borrow.back.as_ref() {
-                back_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-        }
+        let (front_nodeid_opt, back_nodeid_opt) = self.get_front_and_back(arena);
         if let Some(front_nodeid) = front_nodeid_opt {
             front_nodeid.invert(arena);
         }
@@ -357,53 +362,10 @@ impl BspNodeId {
             back_nodeid.invert(arena);
         }
 
-        // Borrow self to swap back and front.
-        let mut front_nodeid_opt = None;
-        let mut back_nodeid_opt = None;
-        {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            if let Some(f) = self_borrow.front.as_ref() {
-                front_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-            if let Some(f) = self_borrow.back.as_ref() {
-                back_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-        }
-        {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            self_borrow.front = back_nodeid_opt;
-            self_borrow.back = front_nodeid_opt;
-        }
-    }
-
-    pub fn get_polygons(&self, polygons: &mut Vec<ConvexPolygon>, arena: &mut BspTree) {
-        let mut tmp;
-        {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            tmp = self_borrow.polygons.clone();
-            polygons.append(&mut tmp);
-        }
-
-        // Borrow self to recurse.
-        let mut front_nodeid_opt = None;
-        let mut back_nodeid_opt = None;
-        {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            if let Some(f) = self_borrow.front.as_ref() {
-                front_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-            if let Some(f) = self_borrow.back.as_ref() {
-                back_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-        }
-
-        // And recurse.
-        if let Some(front_nodeid) = front_nodeid_opt {
-            front_nodeid.get_polygons(polygons, arena);
-        }
-        if let Some(back_nodeid) = back_nodeid_opt {
-            back_nodeid.get_polygons(polygons, arena);
-        }
+        let (front_nodeid_opt, back_nodeid_opt) = self.get_front_and_back(arena);
+        let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
+        self_borrow.front = back_nodeid_opt;
+        self_borrow.back = front_nodeid_opt;
     }
 
     pub fn add_polygons(&self, mut polygons: Vec<ConvexPolygon>, arena: &mut BspTree) {
@@ -433,37 +395,30 @@ impl BspNodeId {
             }
         }
 
-        // Create new front and back nodes in the arena, outside the arena borrow above.
-        let mut front_node_opt;
-        let mut back_node_opt;
-        {
-            front_node_opt = match front.len() > 0 {
-                true => Some(arena.create_node()),
-                false => None,
-            };
-            back_node_opt = match back.len() > 0 {
-                true => Some(arena.create_node()),
-                false => None,
-            };
+        // Get or create new front and back nodes as needed.
+        let (mut front_nodeid_opt, mut back_nodeid_opt) = self.get_front_and_back(arena);
+        if front_nodeid_opt.is_none() && front.len() > 0 {
+            front_nodeid_opt = Some(arena.create_node());
+        }
+        if back_nodeid_opt.is_none() && back.len() > 0 {
+            back_nodeid_opt = Some(arena.create_node());
+        }
+        if let Some(ref mut front_nodeid) = front_nodeid_opt {
+            front_nodeid.add_polygons(front, arena);
+        }
+        if let Some(ref mut back_nodeid) = back_nodeid_opt {
+            back_nodeid.add_polygons(back, arena);
         }
 
-        // Borrow arena again to append recursively.
-        if let Some(ref mut front_node) = front_node_opt {
-            front_node.add_polygons(front, arena);
-        }
-        if let Some(ref mut back_node) = back_node_opt {
-            back_node.add_polygons(back, arena);
-        }
-
-        // Borrow one last time to link up the tree.
+        // Re-set the node links (under a new borrow) in case we had to create them above.
         {
             let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            self_borrow.front = front_node_opt;
-            self_borrow.back = back_node_opt;
+            self_borrow.front = front_nodeid_opt;
+            self_borrow.back = back_nodeid_opt;
         }
     }
 
-    fn clip_to(&self, clip: &BspNodeId, clip_arena: &mut BspTree, arena: &mut BspTree) {
+    fn clip_to(&self, clip: &BspNodeId, clip_arena: &BspTree, arena: &mut BspTree) {
         // Call clipPolygons on `clip` with `self.polygons`, to remove any parts of
         // them that are in the other BSP's internal volume.
         let mut polygons;
@@ -479,20 +434,7 @@ impl BspNodeId {
             self_borrow.polygons = polygons;
         }
 
-        // Borrow self to recurse.
-        let mut front_nodeid_opt = None;
-        let mut back_nodeid_opt = None;
-        {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            if let Some(f) = self_borrow.front.as_ref() {
-                front_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-            if let Some(f) = self_borrow.back.as_ref() {
-                back_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-        }
-
-        // And recurse.
+        let (front_nodeid_opt, back_nodeid_opt) = self.get_front_and_back(arena);
         if let Some(front_nodeid) = front_nodeid_opt {
             front_nodeid.clip_to(clip, clip_arena, arena);
         }
@@ -504,7 +446,7 @@ impl BspNodeId {
     // Remove any members of `polygons`, or parts of `polygons` that are inside this volume.
     fn clip_polygons(&self,
                      mut polygons: Vec<ConvexPolygon>,
-                     arena: &mut BspTree)
+                     arena: &BspTree)
                      -> Vec<ConvexPolygon> {
         if polygons.len() == 0 {
             return Vec::new();
@@ -513,7 +455,7 @@ impl BspNodeId {
         let mut front: Vec<ConvexPolygon> = Vec::new();
         let mut back: Vec<ConvexPolygon> = Vec::new();
         {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
+            let self_borrow = arena.nodes.get(self.index).expect("unknown id");
             if self_borrow.plane.is_none() {
                 return Vec::new();
             }
@@ -531,18 +473,7 @@ impl BspNodeId {
             }
         }
 
-        let mut front_nodeid_opt = None;
-        let mut back_nodeid_opt = None;
-        {
-            let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
-            if let Some(f) = self_borrow.front.as_ref() {
-                front_nodeid_opt = Some(BspNodeId { index: f.index });
-            }
-            if let Some(b) = self_borrow.back.as_ref() {
-                back_nodeid_opt = Some(BspNodeId { index: b.index });
-            }
-        }
-
+        let (front_nodeid_opt, back_nodeid_opt) = self.get_front_and_back(arena);
         if let Some(front_nodeid) = front_nodeid_opt {
             front = front_nodeid.clip_polygons(front, arena);
         }
@@ -554,6 +485,19 @@ impl BspNodeId {
 
         front.append(&mut back);
         return front;
+    }
+
+    fn get_front_and_back(&self, arena: &BspTree) -> (Option<BspNodeId>, Option<BspNodeId>) {
+        let mut front_nodeid_opt = None;
+        let mut back_nodeid_opt = None;
+        let self_borrow = arena.nodes.get(self.index).expect("unknown id");
+        if let Some(f) = self_borrow.front.as_ref() {
+            front_nodeid_opt = Some(BspNodeId { index: f.index });
+        }
+        if let Some(f) = self_borrow.back.as_ref() {
+            back_nodeid_opt = Some(BspNodeId { index: f.index });
+        }
+        return (front_nodeid_opt, back_nodeid_opt);
     }
 }
 
