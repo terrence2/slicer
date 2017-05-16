@@ -283,24 +283,14 @@ impl BspTree {
         self.get_root().invert(self);
     }
 
-    pub fn union(&mut self, other: &mut BspTree) -> Vec<ConvexPolygon> {
-        let mut a = BspTree::new();
-        a.get_root().add_polygons(self.get_polygons(), &mut a);
-
-        let mut b = BspTree::new();
-        b.get_root().add_polygons(other.get_polygons(), &mut b);
-
-        a.clip_to(&mut b);
-        b.clip_to(&mut a);
-        b.invert();
-        b.clip_to(&mut a);
-        b.invert();
-
-        let mut polys = a.get_polygons();
-        polys.append(&mut b.get_polygons());
-        //a.get_root().add_polygons(b.get_polygons(), &mut a);
-
-        return polys;
+    pub fn union_with(&mut self, mut other: BspTree)
+    {
+        self.clip_to(&mut other);
+        other.clip_to(self);
+        other.invert();
+        other.clip_to(self);
+        other.invert();
+        self.get_root().add_polygons(other.get_polygons(), self);
     }
 
     pub fn get_polygons(&self) -> Vec<ConvexPolygon> {
@@ -613,15 +603,15 @@ mod test {
         stl.to_file(&mut fp).unwrap();
     }
 
-    fn save_bsp(bsp: &mut BspTree, name: &str) {
+    fn save_bsp(bsp: &BspTree, name: &str) {
         let polys = bsp.get_polygons();
         save_polygons(&polys, name);
     }
 
     #[test]
     fn test_bsp_create() {
-        let mut bsp = load_cube_bsp();
-        save_bsp(&mut bsp, "test_bsp_create");
+        let bsp = load_cube_bsp();
+        save_bsp(&bsp, "test_bsp_create");
     }
 
     #[test]
@@ -640,7 +630,7 @@ mod test {
 
         bsp.clip_to(&mut bsp_offset);
 
-        save_bsp(&mut bsp, "test_bsp_clip_to");
+        save_bsp(&bsp, "test_bsp_clip_to");
     }
 
     #[test]
@@ -660,7 +650,7 @@ mod test {
         bsp_offset.invert();
         bsp.clip_to(&mut bsp_offset);
 
-        save_bsp(&mut bsp, "test_bsp_invert_clip_to");
+        save_bsp(&bsp, "test_bsp_invert_clip_to");
     }
 
     #[test]
@@ -683,7 +673,7 @@ mod test {
         let mut bsp1 = BspTree::new();
         bsp1.get_root().add_polygons(polygons0, &mut bsp1);
 
-        let mut result = bsp0.union(&mut bsp1);
-        save_polygons(&result, "test_bsp_union");
+        bsp0.union_with(bsp1);
+        save_bsp(&bsp0, "test_bsp_union");
     }
 }
