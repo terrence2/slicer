@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod errors {
     error_chain!{}
 }
@@ -67,30 +69,6 @@ impl Mesh {
         }
         return Ok(mesh);
     }
-
-    /// Import the vertices and faces of `other` into this mesh, cutting out co-planar, intersecting
-    /// faces to result in the minimal mesh. Note: this is not a CSG union: the meshes must be non-
-    /// interpenetrating.
-    pub fn union_non_overlapping(&self, other: &Mesh) -> Result<Mesh> {
-        for mesh_tri0 in self.tris.iter() {
-            let geo_tri0 = mesh_tri0.as_geometry(&self);
-            let pi0 = geo::Plane::from_triangle(&geo_tri0);
-            for mesh_tri1 in other.tris.iter() {
-                if relative_eq!(pi0.distance_to(&mesh_tri1.vert(other, 0)), 0.0f32) &&
-                   relative_eq!(pi0.distance_to(&mesh_tri1.vert(other, 1)), 0.0f32) &&
-                   relative_eq!(pi0.distance_to(&mesh_tri1.vert(other, 2)), 0.0f32) {
-                    // Co-planar
-                    let geo_tri1 = mesh_tri1.as_geometry(other).invert();
-                    println!("Found coplanar faces: {:?} and {:?}", geo_tri0, geo_tri1);
-                    let next_tri0 = geo_tri0.clip_with(&geo_tri1);
-                    // Remove tri0 an tri1.
-                    // Subtract tri1 from tri0 and re-insert all resulting tris into mesh0.
-                    // Subtract tri0 from tri1 and re-insert all resulting tris into mesh1.
-                }
-            }
-        }
-        bail!("not implemented")
-    }
 }
 
 #[cfg(test)]
@@ -106,19 +84,5 @@ mod test {
         assert_eq!(m.normals.len(), 6);
         assert_eq!(m.verts.len(), 8);
         assert_eq!(m.tris.len(), 12);
-    }
-
-    fn load_mesh(filename: &str, tag: u8) -> Mesh {
-        let mut fp = File::open(filename).unwrap();
-        let stl = super::StlMesh::from_file(&mut fp).unwrap();
-        return Mesh::from_stl(stl, tag).unwrap();
-    }
-
-    #[test]
-    fn test_union_nesting() {
-        let m0 = load_mesh("test_data/2color/nested_outer_inner/0.stl", 0);
-        let m1 = load_mesh("test_data/2color/nested_outer_inner/1.stl", 1);
-        //let _ = m0.union_non_overlapping(&m1);
-        assert!(true);
     }
 }

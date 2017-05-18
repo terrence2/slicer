@@ -1,3 +1,4 @@
+use byteorder::{LittleEndian, WriteBytesExt};
 use nalgebra::{distance, Point3};
 use nom::{le_u16, le_u32, le_f32, space, multispace};
 use std::f32;
@@ -14,13 +15,27 @@ use errors::{Result, ResultExt};
 pub struct StlTriangle {
     pub verts: [Point3<f32>; 3],
     pub normal: Point3<f32>,
+    pub color: [u8; 3], // 8-bit RGB format.
+    pub is_color_valid: bool,
 }
 impl StlTriangle {
     pub fn new(v0: Point3<f32>, v1: Point3<f32>, v2: Point3<f32>, norm: Point3<f32>) -> Self {
         StlTriangle {
             verts: [v0, v1, v2],
             normal: norm,
+            color: [0, 0, 0],
+            is_color_valid: false,
         }
+    }
+
+    pub fn set_color(&mut self, r: u8, g: u8, b: u8) {
+        self.color = [r, g, b];
+        self.is_color_valid = true;
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_color(&mut self) {
+        self.is_color_valid = false;
     }
 }
 
@@ -100,6 +115,7 @@ named!(parse_binary_stl <&[u8], StlMesh>, do_parse!(
     (StlMesh { name: "binary".to_owned(), tris: tris })
 ));
 
+#[allow(dead_code)]
 fn max4(a: f32, b: f32, c: f32, d: f32) -> f32 {
     let mut m = a;
     if b > m {
@@ -139,7 +155,8 @@ impl StlMesh {
         }
     }
 
-    pub fn to_file(&self, fp: &mut File) -> Result<()> {
+    #[allow(dead_code)]
+    pub fn to_text_file(&self, fp: &mut File) -> Result<()> {
         let mut buf = format!("solid {}\n", self.name);
         for tri in self.tris.iter() {
             buf += &format!("  facet normal {} {} {}\n",
@@ -168,6 +185,43 @@ impl StlMesh {
         return Ok(());
     }
 
+    pub fn to_binary_file(&self, fp: &mut File) -> Result<()> {
+        let mut buf = Vec::<u8>::new();
+        for _ in 0..80 {
+            buf.write_u8(0).chain_err(|| "make header")?;
+        }
+        buf.write_u32::<LittleEndian>(self.tris.len() as u32)
+            .chain_err(|| "format ntris")?;
+        for tri in self.tris.iter() {
+            for i in 0..3 {
+                buf.write_f32::<LittleEndian>(tri.normal[i])
+                    .chain_err(|| "format normal")?;
+            }
+            for i in 0..3 {
+                for j in 0..3 {
+                    buf.write_f32::<LittleEndian>(tri.verts[i][j])
+                        .chain_err(|| "format vert")?;
+                }
+            }
+            if tri.is_color_valid {
+                // Convert to 15-bit BGR format and set the "valid" bit.
+                let r: u16 = tri.color[0] as u16 >> 3;
+                let g: u16 = tri.color[1] as u16 >> 3;
+                let b: u16 = tri.color[2] as u16 >> 3;
+                let clr = (1 << 15) | (r << 10) | (g << 5) | b;
+                buf.write_u16::<LittleEndian>(clr)
+                    .chain_err(|| "format attr")?;
+            } else {
+                buf.write_u16::<LittleEndian>(0)
+                    .chain_err(|| "format attr")?;
+            }
+        }
+        fp.write_all(buf.as_slice())
+            .chain_err(|| "failed to write")?;
+        return Ok(());
+    }
+
+    #[allow(dead_code)]
     pub fn radius(&self) -> f32 {
         let mut r = 1.0f32;
         for tri in self.tris.iter() {

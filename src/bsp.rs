@@ -1,6 +1,8 @@
-use nalgebra::{Point3, Vector3};
+use nalgebra::{normalize, Point3, Vector3};
 use alga::general::Inverse;
-use std::{mem, u32};
+use std::{mem, f32, u32};
+use stl::{StlMesh, StlTriangle};
+use itertools::Itertools;
 
 #[derive(Clone, Debug)]
 pub struct Vertex {
@@ -29,10 +31,10 @@ pub struct Plane {
 
 #[derive(Debug)]
 pub struct PlaneSplitResult {
-    coplanar_front: Vec<ConvexPolygon>,
-    coplanar_back: Vec<ConvexPolygon>,
-    front: Vec<ConvexPolygon>,
-    back: Vec<ConvexPolygon>,
+    coplanar_front: Vec<Triangle>,
+    coplanar_back: Vec<Triangle>,
+    front: Vec<Triangle>,
+    back: Vec<Triangle>,
 }
 
 // Bit flags for tracking orientation.
@@ -40,14 +42,26 @@ const COPLANAR: u8 = 0;
 const FRONT: u8 = 1;
 const BACK: u8 = 2;
 const SPANNING: u8 = 3;
+const EPSILON: f32 = 1e-5;
 
 impl Plane {
     pub fn from_points(p0: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>) -> Self {
-        let nv = (*p1 - *p0).cross(&(*p2 - *p0)).normalize();
+        let p01 = *p1 - *p0;
+        let p02 = *p2 - *p0;
+        let nv = normalize(&p01.cross(&p02));
+        let d = -nv.dot(&p0.coords);
+        assert!(nv[0] != f32::NAN);
+        assert!(nv[1] != f32::NAN);
+        assert!(nv[2] != f32::NAN);
+        assert!(d != f32::NAN);
         Plane {
             normal: nv,
-            d: -nv.dot(&p0.coords),
+            d: d,
         }
+    }
+
+    fn distance_to(&self, p: &Point3<f32>) -> f32 {
+        self.normal.dot(&p.coords) + self.d
     }
 
     pub fn invert(&mut self) {
@@ -55,24 +69,31 @@ impl Plane {
         self.d = -self.d;
     }
 
-    pub fn split_polygon(&self, polygon: ConvexPolygon) -> PlaneSplitResult {
+    pub fn split_polygon(&self, triangle: Triangle, expect_coplanar: bool) -> PlaneSplitResult {
         let mut result = PlaneSplitResult {
             coplanar_front: Vec::new(),
             coplanar_back: Vec::new(),
             front: Vec::new(),
             back: Vec::new(),
         };
+        if expect_coplanar {
+            println!("self: {:?}", self);
+        }
 
         let mut polygon_type = 0u8;
         let mut vertex_types = Vec::<u8>::new();
-        for vertex in polygon.vertices.iter() {
+        for (i, vertex) in triangle.vertices.iter().enumerate() {
             let t = self.distance_to(&vertex.position);
-            let ty = if relative_eq!(t, 0f32) {
-                COPLANAR
-            } else if t < 0f32 {
+            if expect_coplanar && !relative_eq!(t, 0f32) {
+                println!("plane: {:?}", self);
+                println!("v{}: {}: {:?}", i, t, vertex.position.coords);
+            }
+            let ty = if t < -EPSILON {
                 BACK
-            } else {
+            } else if t > EPSILON {
                 FRONT
+            } else {
+                COPLANAR
             };
             polygon_type |= ty;
             vertex_types.push(ty);
@@ -80,26 +101,29 @@ impl Plane {
 
         match polygon_type {
             COPLANAR => {
-                if self.normal.dot(&polygon.plane.normal) > 0f32 {
-                    result.coplanar_front.push(polygon);
+                if self.normal.dot(&triangle.plane.normal) > 0f32 {
+                    result.coplanar_front.push(triangle);
                 } else {
-                    result.coplanar_back.push(polygon);
+                    result.coplanar_back.push(triangle);
                 }
             }
             FRONT => {
-                result.front.push(polygon);
+                result.front.push(triangle);
             }
             BACK => {
-                result.back.push(polygon);
+                result.back.push(triangle);
             }
             SPANNING => {
-                let (f, b) = self.split_spanning_polygon(vertex_types, polygon);
+                self.split_spanning_polygon(vertex_types, triangle, &mut result.front, &mut result.back);
+                /*
+                let (f, b) = self.split_spanning_polygon(vertex_types, triangle);
                 if f.is_some() {
                     result.front.push(f.unwrap());
                 }
                 if b.is_some() {
                     result.back.push(b.unwrap());
                 }
+                */
             }
             _ => panic!("impossible polygon type when splitting"),
         }
@@ -109,8 +133,9 @@ impl Plane {
 
     fn split_spanning_polygon(&self,
                               vertex_types: Vec<u8>,
-                              polygon: ConvexPolygon)
-                              -> (Option<ConvexPolygon>, Option<ConvexPolygon>) {
+                              polygon: Triangle,
+                              front_tris: &mut Vec<Triangle>,
+                              back_tris: &mut Vec<Triangle>) {
         assert!(polygon.vertices.len() > 2);
         assert!(vertex_types.len() == polygon.vertices.len());
 
@@ -135,73 +160,106 @@ impl Plane {
                 let ref vj = polygon.vertices[(i + 1) % polygon.vertices.len()];
                 let i2j = vj.position - vi.position;
                 let t = -self.distance_to(&vi.position) / self.normal.dot(&i2j);
+
+                // Note that this split quantizes the line's position where it
+                // crosses the split plane to a resolution of f32.
                 let v_split = Vertex {
                     position: vi.position + (i2j * t),
                     normal: vi.normal,
                 };
+
                 back.push(v_split.clone());
                 front.push(v_split);
             }
         }
 
-        // Note that we may create a degenerate polygon if one edge is co-planar.
-        let f = if front.len() > 2 {
-            Some(ConvexPolygon::new_raw(&polygon.plane, front))
-        } else {
-            None
-        };
-        let b = if back.len() > 2 {
-            Some(ConvexPolygon::new_raw(&polygon.plane, back))
-        } else {
-            None
-        };
-        return (f, b);
+        self._build_tris_for_split(front, front_tris, polygon.attribute);
+        self._build_tris_for_split(back, back_tris, polygon.attribute);
     }
 
-    fn distance_to(&self, p: &Point3<f32>) -> f32 {
-        self.normal.dot(&p.coords) + self.d
+    fn _build_tris_for_split(&self, mut verts: Vec<Vertex>, tris: &mut Vec<Triangle>, attr: u8) {
+        // The above algorithm may create a degenerate polygon if one point or edge
+        // is co-planar with the split plane, so we ignore the 1 and 2 cases.
+        if verts.len() == 3 {
+            if let Some((a, b, c)) = verts.into_iter().tuples().next() {
+                tris.push(Triangle::from_vertices(a, b, c, attr));
+            }
+        } else if verts.len() == 4 {
+            // Quantization may throw our points out of co-planarity, so we always
+            // reduce to triangles, even though this results in more intermediate objects.
+            if let Some((a, b, c, d)) = verts.into_iter().tuples().next() {
+                tris.push(Triangle::from_vertices(a.clone(), b, c.clone(), attr));
+                tris.push(Triangle::from_vertices(a, c, d, attr));
+            }
+        } else if verts.len() > 4 {
+            panic!("unexpectedly large number of vertices");
+        }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct ConvexPolygon {
+pub struct Triangle {
     plane: Plane,
     vertices: Vec<Vertex>,
+    attribute: u8,
 }
 
-impl ConvexPolygon {
-    fn new_raw(plane: &Plane, vertices: Vec<Vertex>) -> ConvexPolygon {
-        ConvexPolygon {
-            plane: plane.clone(),
+impl Triangle {
+
+    fn new_raw2(plane: &Plane, vertices: Vec<Vertex>, attr: u8) -> (bool, Self) {
+        let mut different = false;
+        let new_plane = Plane::from_points(&vertices[0].position, &vertices[1].position, &vertices[2].position);
+        for i in 0..vertices.len() - 3 {
+            let tmp = Plane::from_points(&vertices[i + 0].position,
+                                         &vertices[i + 1].position,
+                                         &vertices[i + 2].position);
+            if plane.normal != tmp.normal || plane.d != tmp.d {
+                println!("At i{}", i);
+            }
+            assert_eq!(new_plane.normal, tmp.normal);
+            assert_eq!(new_plane.d, tmp.d);
+        }
+        (different, Triangle {
+            plane: new_plane,
             vertices: vertices,
+            attribute: attr,
+        })
+    }
+
+    fn new_raw(plane: &Plane, v0: Vertex, v1: Vertex, v2: Vertex, attr: u8) -> Self {
+        let tmp = Plane::from_points(&v0.position, &v1.position, &v2.position);
+        assert_eq!(plane.normal, tmp.normal);
+        assert_eq!(plane.d, tmp.d);
+        Triangle {
+            plane: plane.clone(),
+            vertices: vec![v0, v1, v2],
+            attribute: attr,
         }
     }
 
-    pub fn from_points(p0: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>) -> Self {
+    pub fn from_vertices(v0: Vertex, v1: Vertex, v2: Vertex, attr: u8) -> Self {
+        let plane = Plane::from_points(&v0.position, &v1.position, &v2.position);
+        return Triangle {
+            plane: plane,
+            vertices: vec![v0, v1, v2],
+            attribute: attr,
+        };
+    }
+
+    pub fn from_points(p0: &Point3<f32>, p1: &Point3<f32>, p2: &Point3<f32>, attr: u8) -> Self {
         let plane = Plane::from_points(p0, p1, p2);
-        let verts = vec![Vertex::new(p0, &plane.normal),
-                         Vertex::new(p1, &plane.normal),
-                         Vertex::new(p2, &plane.normal)];
-        return ConvexPolygon {
+        let vertices = vec![Vertex::new(p0, &plane.normal),
+                            Vertex::new(p1, &plane.normal),
+                            Vertex::new(p2, &plane.normal)];
+        return Triangle {
                    plane: plane,
-                   vertices: verts,
+                   vertices: vertices,
+                   attribute: 0,
                };
     }
 
-    pub fn from_points4(p0: &Point3<f32>,
-                        p1: &Point3<f32>,
-                        p2: &Point3<f32>,
-                        p3: &Point3<f32>)
-                        -> Self {
-        let plane = Plane::from_points(p0, p1, p2);
-        let verts = vec![Vertex::new(p0, &plane.normal),
-                         Vertex::new(p1, &plane.normal),
-                         Vertex::new(p2, &plane.normal),
-                         Vertex::new(p3, &plane.normal)];
-        return ConvexPolygon {
-                   plane: plane,
-                   vertices: verts,
-               };
+    pub fn set_attribute(&mut self, attr: u8) {
+        self.attribute = attr;
     }
 
     pub fn invert(&mut self) {
@@ -212,7 +270,55 @@ impl ConvexPolygon {
         self.vertices.reverse();
     }
 
-    pub fn to_triangles(&self) -> Vec<ConvexPolygon> {
+    /*
+    pub fn new_pair_from_quad(v0: Vertex, v1: Vertex, v2: Vertex, v3: Vertex, attr: u8) -> (Self, Self) {
+        let l02 = (v0.position - v2.position).norm_squared();
+        let l13 = (v1.position - v3.position).norm_squared();
+        let a0;
+        let a1;
+        let a2;
+        let b0;
+        let b1;
+        let b2;
+        if l02 < l13 {
+            a0 = v0.clone();
+            a1 = v1;
+            a2 = v2.clone();
+            b0 = v0;
+            b1 = v2;
+            b2 = v3;
+            return (Triangle::from_vertices(
+                                      a0,
+                                      a1,
+                                      a2,
+                                      attr),
+                    Triangle::from_vertices(
+                                      b0,
+                                      b1,
+                                      b2,
+                                      attr));
+        } else {
+            a0 = v0;
+            a1 = v1.clone();
+            a2 = v3.clone();
+            b0 = v1;
+            b1 = v2;
+            b2 = v3;
+            return (Triangle::new_raw(&Plane::from_points(&a0.position, &a1.position, &a2.position),
+                                      a0,
+                                      a1,
+                                      a2,
+                                      attr),
+                    Triangle::new_raw(&Plane::from_points(&b0.position, &b1.position, &b2.position),
+                                      b0,
+                                      b1,
+                                      b2,
+                                      attr));
+        }
+    }
+    */
+
+    pub fn to_triangles(&self) -> Vec<Triangle> {
         assert!(self.vertices.len() > 2);
         if self.vertices.len() == 3 {
             return vec![self.clone()];
@@ -221,33 +327,29 @@ impl ConvexPolygon {
             let l02 = (self.vertices[0].position - self.vertices[2].position).norm_squared();
             let l13 = (self.vertices[1].position - self.vertices[3].position).norm_squared();
             if l02 < l13 {
-                return vec![ConvexPolygon::new_raw(&self.plane,
-                                                   vec![self.vertices[0].clone(),
-                                                        self.vertices[1].clone(),
-                                                        self.vertices[2].clone()]),
-                            ConvexPolygon::new_raw(&self.plane,
-                                                   vec![self.vertices[0].clone(),
-                                                        self.vertices[2].clone(),
-                                                        self.vertices[3].clone()])];
+                return vec![Triangle::new_raw(&self.plane,
+                                              self.vertices[0].clone(),
+                                              self.vertices[1].clone(),
+                                              self.vertices[2].clone(),
+                                              self.attribute),
+                            Triangle::new_raw(&self.plane,
+                                              self.vertices[0].clone(),
+                                              self.vertices[2].clone(),
+                                              self.vertices[3].clone(),
+                                              self.attribute)];
             }
-            return vec![ConvexPolygon::new_raw(&self.plane,
-                                               vec![self.vertices[0].clone(),
-                                                    self.vertices[1].clone(),
-                                                    self.vertices[3].clone()]),
-                        ConvexPolygon::new_raw(&self.plane,
-                                               vec![self.vertices[1].clone(),
-                                                    self.vertices[2].clone(),
-                                                    self.vertices[3].clone()])];
+            return vec![Triangle::new_raw(&self.plane,
+                                          self.vertices[0].clone(),
+                                          self.vertices[1].clone(),
+                                          self.vertices[3].clone(),
+                                          self.attribute),
+                        Triangle::new_raw(&self.plane,
+                                          self.vertices[1].clone(),
+                                          self.vertices[2].clone(),
+                                          self.vertices[3].clone(),
+                                          self.attribute)];
         }
-        // FIXME: pick a better algorithm than fan.
-        let mut polys = Vec::new();
-        for i in 1..self.vertices.len() - 1 {
-            polys.push(ConvexPolygon::new_raw(&self.plane,
-                                              vec![self.vertices[0].clone(),
-                                                   self.vertices[i].clone(),
-                                                   self.vertices[i + 1].clone()]));
-        }
-        return polys;
+        panic!("triangle with more than 4 vertices");
     }
 }
 
@@ -259,7 +361,7 @@ pub struct BspNode {
     plane: Option<Plane>,
     front: Option<BspNodeId>,
     back: Option<BspNodeId>,
-    polygons: Vec<ConvexPolygon>,
+    polygons: Vec<Triangle>,
 }
 
 #[derive(Clone)]
@@ -268,6 +370,55 @@ pub struct BspNodeId {
 }
 
 impl BspTree {
+    pub fn new_from_stl(stl: &StlMesh, attr: u8) -> BspTree {
+        // TODO: this recomputes the normal. Can we take it safely from
+        // the STL file, or is that going to result in havoc down the road?
+        // We need to time this phase on a heavy file to find out.
+        let mut polygons = vec![];
+        for t in stl.tris.iter() {
+            let mut p = Triangle::from_points(&t.verts[0], &t.verts[1], &t.verts[2], 0);
+            p.set_attribute(attr);
+            /*
+            let p0 = &t.verts[1];
+            let p1 = &t.verts[2];
+            let p2 = &t.verts[0];
+            let nvn = (*p1 - *p0).cross(&(*p2 - *p0)).normalize();
+            let normed = t.normal.clone();
+            //normed.normalize();
+            println!("{} == {} == {}", p.plane.normal[0], t.normal.coords[0], nvn[0]);
+            println!("{} == {} == {}", p.plane.normal[1], t.normal.coords[1], nvn[1]);
+            println!("{} == {} == {}", p.plane.normal[2], t.normal.coords[2], nvn[2]);
+            println!("{}; {}; {}", p0.coords, p1.coords, p2.coords);
+            assert!(relative_eq!(p.plane.normal[0], t.normal.coords[0]));
+            assert!(relative_eq!(p.plane.normal[1], t.normal.coords[1]));
+            assert!(relative_eq!(p.plane.normal[2], t.normal.coords[2]));
+            */
+            polygons.push(p);
+        }
+        let mut bsp = Self::new();
+        bsp.get_root().add_polygons(polygons, &mut bsp);
+        return bsp;
+    }
+
+    pub fn convert_to_stl(&self, name: &str) -> StlMesh {
+        let mut tris: Vec<StlTriangle> = Vec::new();
+        for poly in self.get_polygons() {
+            for t in poly.to_triangles() {
+                let mut u = StlTriangle::new(t.vertices[0].position,
+                                             t.vertices[1].position,
+                                             t.vertices[2].position,
+                                             Point3::from_coordinates(t.plane.normal));
+                match t.attribute {
+                    1 => u.set_color(0, 97, 207),
+                    2 => u.set_color(0, 207, 97),
+                    _ => u.set_color(255, 0, 255)
+                }
+                tris.push(u);
+            }
+        }
+        return StlMesh::from_tris(name, tris);
+    }
+
     pub fn new() -> Self {
         let mut tree = BspTree { nodes: Vec::new() };
         tree.create_node();
@@ -283,8 +434,7 @@ impl BspTree {
         self.get_root().invert(self);
     }
 
-    pub fn union_with(&mut self, mut other: BspTree)
-    {
+    pub fn union_with(&mut self, mut other: BspTree) {
         self.clip_to(&mut other);
         other.clip_to(self);
         other.invert();
@@ -293,7 +443,7 @@ impl BspTree {
         self.get_root().add_polygons(other.get_polygons(), self);
     }
 
-    pub fn get_polygons(&self) -> Vec<ConvexPolygon> {
+    pub fn get_polygons(&self) -> Vec<Triangle> {
         let mut out = Vec::new();
         self.get_root().get_polygons(&mut out, self);
         return out;
@@ -317,7 +467,7 @@ impl BspTree {
 }
 
 impl BspNodeId {
-    pub fn get_polygons(&self, polygons: &mut Vec<ConvexPolygon>, arena: &BspTree) {
+    pub fn get_polygons(&self, polygons: &mut Vec<Triangle>, arena: &BspTree) {
         {
             let self_borrow = arena.nodes.get(self.index).expect("unknown id");
             let mut tmp = self_borrow.polygons.clone();
@@ -358,32 +508,69 @@ impl BspNodeId {
         self_borrow.back = front_nodeid_opt;
     }
 
-    pub fn add_polygons(&self, mut polygons: Vec<ConvexPolygon>, arena: &mut BspTree) {
+    pub fn add_polygons(&self, mut polygons: Vec<Triangle>, arena: &mut BspTree) {
+        println!("adding {} polys", polygons.len());
         if polygons.is_empty() {
             return;
         }
 
         // Borrow arena to use self's node to split the polygons. Add any co-planar
         // polygons to our list and split the rest into front and back lists.
-        let mut front = Vec::<ConvexPolygon>::new();
-        let mut back = Vec::<ConvexPolygon>::new();
+        let mut front = Vec::<Triangle>::new();
+        let mut back = Vec::<Triangle>::new();
         {
             let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
 
+            let mut using_poly0_plane = false;
             if self_borrow.plane.is_none() {
                 // TODO: find and use a good heuristic for our initial split plane.
-                self_borrow.plane = Some(polygons[0].plane.clone());
+                //self_borrow.plane = Some(polygons[0].plane.clone());
+                self_borrow.plane = Some(Plane::from_points(
+                    &polygons[0].vertices[0].position,
+                    &polygons[0].vertices[1].position,
+                    &polygons[0].vertices[2].position));
+                using_poly0_plane = true;
+                let test_plane = Plane::from_points(
+                    &polygons[0].vertices[0].position,
+                    &polygons[0].vertices[1].position,
+                    &polygons[0].vertices[2].position,
+                );
+                assert_eq!(test_plane.normal, polygons[0].plane.normal);
+                assert_eq!(test_plane.d, polygons[0].plane.d);
+
+                println!("test plane: {:?}", test_plane);
+                println!("poly plane: {:?}", polygons[0].plane);
+
+                let dt0 = test_plane.distance_to(&polygons[0].vertices[0].position);
+                let dt1 = test_plane.distance_to(&polygons[0].vertices[1].position);
+                let dt2 = test_plane.distance_to(&polygons[0].vertices[2].position);
+                println!("distance to test plane: {}, {}, {}", dt0, dt1, dt2);
+
+                let dv0 = polygons[0].plane.distance_to(&polygons[0].vertices[0].position);
+                let dv1 = polygons[0].plane.distance_to(&polygons[0].vertices[1].position);
+                let dv2 = polygons[0].plane.distance_to(&polygons[0].vertices[2].position);
+                println!("disvance to poly plane: {}, {}, {}", dv0, dv1, dv2);
+
+                println!("test plane: {:?}", test_plane);
+                println!("poly plane: {:?}", polygons[0].plane);
             }
 
             let plane: &Plane = self_borrow.plane.as_ref().expect("not none");
             for poly in polygons.drain(..) {
-                let mut result = plane.split_polygon(poly);
+                let mut result = plane.split_polygon(poly, using_poly0_plane);
+                if using_poly0_plane {
+                    using_poly0_plane = false;
+                    assert_eq!(result.front.len(), 0);
+                    assert_eq!(result.back.len(), 0); // FAILING HERE!
+                    assert!(result.coplanar_front.len() + result.coplanar_back.len() > 0);
+                }
                 front.append(&mut result.front);
                 back.append(&mut result.back);
                 self_borrow.polygons.append(&mut result.coplanar_front);
                 self_borrow.polygons.append(&mut result.coplanar_back);
             }
         }
+        println!("split polys: f: {}, b: {}", front.len(), back.len());
 
         // Get or create new front and back nodes as needed.
         let (mut front_nodeid_opt, mut back_nodeid_opt) = self.get_front_and_back(arena);
@@ -435,15 +622,15 @@ impl BspNodeId {
 
     // Remove any members of `polygons`, or parts of `polygons` that are inside this volume.
     fn clip_polygons(&self,
-                     mut polygons: Vec<ConvexPolygon>,
+                     mut polygons: Vec<Triangle>,
                      arena: &BspTree)
-                     -> Vec<ConvexPolygon> {
+                     -> Vec<Triangle> {
         if polygons.len() == 0 {
             return Vec::new();
         }
 
-        let mut front: Vec<ConvexPolygon> = Vec::new();
-        let mut back: Vec<ConvexPolygon> = Vec::new();
+        let mut front: Vec<Triangle> = Vec::new();
+        let mut back: Vec<Triangle> = Vec::new();
         {
             let self_borrow = arena.nodes.get(self.index).expect("unknown id");
             if self_borrow.plane.is_none() {
@@ -455,7 +642,7 @@ impl BspNodeId {
                     .plane
                     .as_ref()
                     .expect("not none")
-                    .split_polygon(polygon);
+                    .split_polygon(polygon, false);
                 front.append(&mut result.front);
                 front.append(&mut result.coplanar_front);
                 back.append(&mut result.back);
@@ -496,7 +683,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_plane_distance() {
+    fn test_plane_distance_orthogonal_origin() {
         let p0 = Point3::new(0f32, 0f32, 0f32);
         let p1 = Point3::new(1f32, 0f32, 0f32);
         let p2 = Point3::new(0f32, 1f32, 0f32);
@@ -510,10 +697,10 @@ mod test {
         let plane = Plane::from_points(&Point3::new(0f32, 0f32, 0f32),
                                        &Point3::new(1f32, 0f32, 0f32),
                                        &Point3::new(0f32, 1f32, 0f32));
-        let poly = ConvexPolygon::from_points(&Point3::new(0f32, 0f32, -1f32),
-                                              &Point3::new(0f32, 0f32, 1f32),
-                                              &Point3::new(0f32, 1f32, 0f32));
-        let result = plane.split_polygon(poly);
+        let poly = Triangle::from_points(&Point3::new(0f32, 0f32, -1f32),
+                                         &Point3::new(0f32, 0f32, 1f32),
+                                         &Point3::new(0f32, 1f32, 0f32), 0);
+        let result = plane.split_polygon(poly, false);
         assert_eq!(result.front.len(), 1);
         assert_eq!(result.front[0].vertices.len(), 3);
         assert_eq!(result.back.len(), 1);
@@ -533,10 +720,10 @@ mod test {
         let plane = Plane::from_points(&Point3::new(0f32, 0f32, 0f32),
                                        &Point3::new(1f32, 0f32, 0f32),
                                        &Point3::new(0f32, 1f32, 0f32));
-        let poly = ConvexPolygon::from_points(&Point3::new(0f32, 0f32, 0f32),
-                                              &Point3::new(1f32, 0f32, 0f32),
-                                              &Point3::new(0f32, 1f32, 0f32));
-        let result = plane.split_polygon(poly);
+        let poly = Triangle::from_points(&Point3::new(0f32, 0f32, 0f32),
+                                         &Point3::new(1f32, 0f32, 0f32),
+                                         &Point3::new(0f32, 1f32, 0f32), 0);
+        let result = plane.split_polygon(poly, false);
         assert_eq!(result.front.len(), 0);
         assert_eq!(result.back.len(), 0);
         assert_eq!(result.coplanar_front.len(), 1);
@@ -552,10 +739,10 @@ mod test {
         let plane = Plane::from_points(&Point3::new(0f32, 0f32, 0f32),
                                        &Point3::new(1f32, 0f32, 0f32),
                                        &Point3::new(0f32, 1f32, 0f32));
-        let poly = ConvexPolygon::from_points(&Point3::new(0f32, 1f32, 0f32),
-                                              &Point3::new(1f32, 0f32, 0f32),
-                                              &Point3::new(0f32, 0f32, 0f32));
-        let result = plane.split_polygon(poly);
+        let poly = Triangle::from_points(&Point3::new(0f32, 1f32, 0f32),
+                                         &Point3::new(1f32, 0f32, 0f32),
+                                         &Point3::new(0f32, 0f32, 0f32), 0);
+        let result = plane.split_polygon(poly, false);
         assert_eq!(result.front.len(), 0);
         assert_eq!(result.back.len(), 0);
         assert_eq!(result.coplanar_front.len(), 0);
@@ -577,30 +764,25 @@ mod test {
         return m;
     }
 
-    fn load_cube_bsp() -> BspTree {
-        let m = load_cube_text();
-        let polygons0 = m.tris
-            .iter()
-            .map(|t| ConvexPolygon::from_points(&t.verts[0], &t.verts[1], &t.verts[2]))
-            .collect::<Vec<ConvexPolygon>>();
-        let mut bsp = BspTree::new();
-        bsp.get_root().add_polygons(polygons0, &mut bsp);
-        return bsp;
-    }
-
-    fn save_polygons(polygons: &Vec<ConvexPolygon>, name: &str) {
+    fn save_polygons(polygons: &Vec<Triangle>, name: &str) {
         let mut tris: Vec<StlTriangle> = Vec::new();
         for poly in polygons {
             for t in poly.to_triangles() {
-                tris.push(StlTriangle::new(t.vertices[0].position,
-                                           t.vertices[1].position,
-                                           t.vertices[2].position,
-                                           Point3::from_coordinates(t.plane.normal)));
+                let mut u = StlTriangle::new(t.vertices[0].position,
+                                             t.vertices[1].position,
+                                             t.vertices[2].position,
+                                             Point3::from_coordinates(t.plane.normal));
+                match t.attribute {
+                    1 => u.set_color(0, 97, 207),
+                    2 => u.set_color(0, 207, 97),
+                    _ => u.set_color(255, 0, 255)
+                }
+                tris.push(u);
             }
         }
         let stl = StlMesh::from_tris(name, tris);
         let mut fp = File::create(format!("target/{}.stl", name)).unwrap();
-        stl.to_file(&mut fp).unwrap();
+        stl.to_binary_file(&mut fp).unwrap();
     }
 
     fn save_bsp(bsp: &BspTree, name: &str) {
@@ -610,19 +792,21 @@ mod test {
 
     #[test]
     fn test_bsp_create() {
-        let bsp = load_cube_bsp();
+        let bsp = BspTree::new_from_stl(&load_cube_text(), 1);
         save_bsp(&bsp, "test_bsp_create");
     }
 
     #[test]
     fn test_bsp_clip_to() {
-        let mut bsp = load_cube_bsp();
+        let mut bsp = BspTree::new_from_stl(&load_cube_text(), 1);
 
-        let mut polygons1 = Vec::<ConvexPolygon>::new();
-        polygons1.push(ConvexPolygon::from_points4(&Point3::new(10f32, 0.5f32, 10f32),
-                                                   &Point3::new(10f32, 0.5f32, -10f32),
-                                                   &Point3::new(-10f32, 0.5f32, -10f32),
-                                                   &Point3::new(-10f32, 0.5f32, 10f32)));
+        let mut polygons1 = Vec::<Triangle>::new();
+        polygons1.push(Triangle::from_points(&Point3::new(10f32, 0.5f32, 10f32),
+                                             &Point3::new(10f32, 0.5f32, -10f32),
+                                             &Point3::new(-10f32, 0.5f32, -10f32), 0));
+        polygons1.push(Triangle::from_points(&Point3::new(10f32, 0.5f32, 10f32),
+                                             &Point3::new(-10f32, 0.5f32, -10f32),
+                                             &Point3::new(-10f32, 0.5f32, 10f32), 0));
         let mut bsp_offset = BspTree::new();
         bsp_offset
             .get_root()
@@ -635,13 +819,15 @@ mod test {
 
     #[test]
     fn test_bsp_inverted_clip_to() {
-        let mut bsp = load_cube_bsp();
+        let mut bsp = BspTree::new_from_stl(&load_cube_text(), 1);
 
-        let mut polygons1 = Vec::<ConvexPolygon>::new();
-        polygons1.push(ConvexPolygon::from_points4(&Point3::new(10f32, 0.5f32, 10f32),
-                                                   &Point3::new(10f32, 0.5f32, -10f32),
-                                                   &Point3::new(-10f32, 0.5f32, -10f32),
-                                                   &Point3::new(-10f32, 0.5f32, 10f32)));
+        let mut polygons1 = Vec::<Triangle>::new();
+        polygons1.push(Triangle::from_points(&Point3::new(10f32, 0.5f32, 10f32),
+                                             &Point3::new(10f32, 0.5f32, -10f32),
+                                             &Point3::new(-10f32, 0.5f32, -10f32), 0));
+        polygons1.push(Triangle::from_points(&Point3::new(10f32, 0.5f32, 10f32),
+                                             &Point3::new(-10f32, 0.5f32, -10f32),
+                                             &Point3::new(-10f32, 0.5f32, 10f32), 0));
         let mut bsp_offset = BspTree::new();
         bsp_offset
             .get_root()
@@ -655,10 +841,10 @@ mod test {
 
     #[test]
     fn test_bsp_union() {
-        let mut bsp0 = load_cube_bsp();
+        let mut bsp0 = BspTree::new_from_stl(&load_cube_text(), 1);
 
         let m = load_cube_text();
-        let mut polygons0 = Vec::<ConvexPolygon>::new();
+        let mut polygons0 = Vec::<Triangle>::new();
         for t in m.tris.iter() {
             let mut v0 = t.verts[0].clone();
             let mut v1 = t.verts[1].clone();
@@ -668,7 +854,8 @@ mod test {
                 v1.coords.as_mut_slice()[i] -= 0.5f32;
                 v2.coords.as_mut_slice()[i] -= 0.5f32;
             }
-            polygons0.push(ConvexPolygon::from_points(&v0, &v1, &v2));
+            let mut poly = Triangle::from_points(&v0, &v1, &v2, 2);
+            polygons0.push(poly);
         }
         let mut bsp1 = BspTree::new();
         bsp1.get_root().add_polygons(polygons0, &mut bsp1);

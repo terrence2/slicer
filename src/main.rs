@@ -1,10 +1,13 @@
 extern crate alga;
 #[macro_use]
 extern crate approx;
+extern crate byteorder;
 #[macro_use]
 extern crate clap;
 #[macro_use]
 extern crate error_chain;
+#[macro_use]
+extern crate itertools;
 #[macro_use]
 extern crate nom;
 extern crate nalgebra;
@@ -17,6 +20,7 @@ mod geometry;
 mod mesh;
 mod stl;
 
+use bsp::BspTree;
 use mesh::Mesh;
 use std::fs::File;
 use stl::StlMesh;
@@ -36,24 +40,42 @@ fn run() -> Result<()> {
     let filenames = matches.values_of("INPUT").unwrap().collect::<Vec<&str>>();
 
     // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
-    let mut meshes = Vec::<Mesh>::new();
+    let mut merged: Option<BspTree> = None;
     for (i, filename) in filenames.iter().enumerate() {
         let mut fp = File::open(filename)
             .chain_err(|| format!("failed to open source file: {}", filename))?;
+
+        println!("Loading STL from file: {}", filename);
         let stl = StlMesh::from_file(&mut fp)
             .chain_err(|| "failed to load stl file")?;
-        let mesh = Mesh::from_stl(stl, i as u8)
-            .chain_err(|| format!("failed to reify mesh: {}", filename))?;
-        meshes.push(mesh);
+
+        println!("Creating BSP tree...");
+        let bsp = BspTree::new_from_stl(&stl, i as u8);
+
+        println!("Merging with existing mesh...");
+        if let Some(ref mut target) = merged {
+            target.union_with(bsp);
+        } else {
+            merged = Some(bsp);
+        }
+    }
+
+    if let Some(bsp) = merged {
+        println!("Converting merged mesh to STL...");
+        let stl = bsp.convert_to_stl("slicer merge mesh");
+
+        println!("Writing merged mesh to: a.stl");
+        let mut fp = File::create("a.stl").unwrap();
+        stl.to_binary_file(&mut fp).unwrap();
     }
 
     // Union all meshes, preserving the face tags.
     //   Build a BSP of the first mesh and then union into it.
-    let mut mesh = meshes.pop().unwrap();
-    for other in meshes.iter() {
-        mesh = mesh.union_non_overlapping(other)
-            .chain_err(|| "failed to merge mesh")?;
-    }
+    //let mut mesh = meshes.pop().unwrap();
+    //for other in meshes.iter() {
+        //mesh = mesh.union_non_overlapping(other)
+        //    .chain_err(|| "failed to merge mesh")?;
+    //}
 
     // Build an infill mesh somehow, tagging faces with "don't care" extruder setting.
     // BSP should be able to carve these to the right shape by doing something like
@@ -84,7 +106,8 @@ fn run() -> Result<()> {
     // forces. Ensure that there is adequate support to print.
 
 
-    println!("  Verts: {}", mesh.verts.len());
-    println!("  Norms: {}", mesh.normals.len());
+    //println!("  Verts: {}", mesh.verts.len());
+    //println!("  Norms: {}", mesh.normals.len());
     Ok(())
 }
+
