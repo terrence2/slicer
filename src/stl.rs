@@ -160,22 +160,22 @@ impl StlMesh {
         let mut buf = format!("solid {}\n", self.name);
         for tri in self.tris.iter() {
             buf += &format!("  facet normal {} {} {}\n",
-                    tri.normal[0],
-                    tri.normal[1],
-                    tri.normal[2]);
+                            tri.normal[0],
+                            tri.normal[1],
+                            tri.normal[2]);
             buf += &format!("    outer loop\n");
             buf += &format!("      verts {} {} {}\n",
-                    tri.verts[0][0],
-                    tri.verts[0][1],
-                    tri.verts[0][2]);
+                            tri.verts[0][0],
+                            tri.verts[0][1],
+                            tri.verts[0][2]);
             buf += &format!("      verts {} {} {}\n",
-                    tri.verts[1][0],
-                    tri.verts[1][1],
-                    tri.verts[1][2]);
+                            tri.verts[1][0],
+                            tri.verts[1][1],
+                            tri.verts[1][2]);
             buf += &format!("      verts {} {} {}\n",
-                    tri.verts[2][0],
-                    tri.verts[2][1],
-                    tri.verts[2][2]);
+                            tri.verts[2][0],
+                            tri.verts[2][1],
+                            tri.verts[2][2]);
             buf += &format!("    end loop\n");
             buf += &format!("  end facet\n");
         }

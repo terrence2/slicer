@@ -37,7 +37,10 @@ fn run() -> Result<()> {
     let matches = parser.get_matches();
 
     // Clap ensures that there is at least one INPUT value to unwrap.
-    let filenames = matches.values_of("INPUT").unwrap().collect::<Vec<&str>>();
+    let filenames = matches
+        .values_of("INPUT")
+        .unwrap()
+        .collect::<Vec<&str>>();
 
     // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
     let mut merged: Option<BspTree> = None;
@@ -73,8 +76,8 @@ fn run() -> Result<()> {
     //   Build a BSP of the first mesh and then union into it.
     //let mut mesh = meshes.pop().unwrap();
     //for other in meshes.iter() {
-        //mesh = mesh.union_non_overlapping(other)
-        //    .chain_err(|| "failed to merge mesh")?;
+    //mesh = mesh.union_non_overlapping(other)
+    //    .chain_err(|| "failed to merge mesh")?;
     //}
 
     // Build an infill mesh somehow, tagging faces with "don't care" extruder setting.
@@ -110,4 +113,3 @@ fn run() -> Result<()> {
     //println!("  Norms: {}", mesh.normals.len());
     Ok(())
 }
-
