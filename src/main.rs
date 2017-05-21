@@ -34,6 +34,7 @@ mod errors {
 }
 mod bsp;
 mod geometry;
+mod merge;
 mod mesh;
 mod stl;
 
