@@ -558,7 +558,7 @@ mod test {
                                          &Point3::new(0f32, 1f32, 0f32),
                                          0)
                 .unwrap();
-        let result = plane.split_polygon(poly);
+        let result = plane.split_polygon(poly, false);
         assert_eq!(result.front.len(), 1);
         assert_eq!(result.front[0].vertices.len(), 3);
         assert_eq!(result.back.len(), 1);
@@ -583,7 +583,7 @@ mod test {
                                          &Point3::new(0f32, 1f32, 0f32),
                                          0)
                 .unwrap();
-        let result = plane.split_polygon(poly);
+        let result = plane.split_polygon(poly, false);
         assert_eq!(result.front.len(), 0);
         assert_eq!(result.back.len(), 0);
         assert_eq!(result.coplanar_front.len(), 1);
@@ -604,7 +604,7 @@ mod test {
                                          &Point3::new(0f32, 0f32, 0f32),
                                          0)
                 .unwrap();
-        let result = plane.split_polygon(poly);
+        let result = plane.split_polygon(poly, false);
         assert_eq!(result.front.len(), 0);
         assert_eq!(result.back.len(), 0);
         assert_eq!(result.coplanar_front.len(), 0);
@@ -671,7 +671,7 @@ mod test {
                                              &Point3::new(-10f32, 0.5f32, 10f32),
                                              0)
                                .unwrap());
-        let mut bsp_offset = BspTree::new();
+        let mut bsp_offset = BspTree::new("test");
         bsp_offset
             .get_root()
             .add_polygons(polygons1, &mut bsp_offset);
@@ -696,7 +696,7 @@ mod test {
                                              &Point3::new(-10f32, 0.5f32, 10f32),
                                              0)
                                .unwrap());
-        let mut bsp_offset = BspTree::new();
+        let mut bsp_offset = BspTree::new("test");
         bsp_offset
             .get_root()
             .add_polygons(polygons1, &mut bsp_offset);
@@ -725,7 +725,7 @@ mod test {
             let poly = Triangle::from_points(&v0, &v1, &v2, 2).unwrap();
             polygons0.push(poly);
         }
-        let mut bsp1 = BspTree::new();
+        let mut bsp1 = BspTree::new("test");
         bsp1.get_root().add_polygons(polygons0, &mut bsp1);
 
         bsp0.union_with(bsp1);
