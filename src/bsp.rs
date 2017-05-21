@@ -63,13 +63,22 @@ impl Plane {
         self.d = -self.d;
     }
 
-    pub fn split_polygon(&self, triangle: Triangle) -> PlaneSplitResult {
+    pub fn split_polygon(&self, triangle: Triangle, known_coplanar: bool) -> PlaneSplitResult {
         let mut result = PlaneSplitResult {
             coplanar_front: Vec::new(),
             coplanar_back: Vec::new(),
             front: Vec::new(),
             back: Vec::new(),
         };
+
+        if known_coplanar {
+            if self.normal.dot(&triangle.plane.normal) > 0f32 {
+                result.coplanar_front.push(triangle);
+            } else {
+                result.coplanar_back.push(triangle);
+            }
+            return result;
+        }
 
         let mut triangle_type = 0u8;
         let mut vertex_types: [u8; 3] = [0, 0, 0];
@@ -387,14 +396,16 @@ impl BspNodeId {
         {
             let self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
 
+            let mut split_plane_index = None;
             if self_borrow.plane.is_none() {
                 // TODO: find and use a good heuristic for our initial split plane.
                 self_borrow.plane = Some(polygons[0].plane.clone());
+                split_plane_index = Some(0);
             }
 
             let plane: &Plane = self_borrow.plane.as_ref().expect("not none");
-            for poly in polygons.drain(..) {
-                let mut result = plane.split_polygon(poly);
+            for (i, poly) in polygons.drain(..).enumerate() {
+                let mut result = plane.split_polygon(poly, split_plane_index == Some(i));
                 front.append(&mut result.front);
                 back.append(&mut result.back);
                 self_borrow.polygons.append(&mut result.coplanar_front);
@@ -469,7 +480,7 @@ impl BspNodeId {
                     .plane
                     .as_ref()
                     .expect("not none")
-                    .split_polygon(polygon);
+                    .split_polygon(polygon, false);
                 front.append(&mut result.front);
                 front.append(&mut result.coplanar_front);
                 back.append(&mut result.back);
