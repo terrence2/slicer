@@ -112,7 +112,7 @@ named!(get_binary_triangle <&[u8], StlTriangle>, do_parse!(
 named!(parse_binary_stl <&[u8], StlMesh>, do_parse!(
     header: take!(80) >>
     tris: length_count!(le_u32, get_binary_triangle) >>
-    (StlMesh { name: "binary".to_owned(), tris: tris })
+    (StlMesh { name: "<name unknown>".to_owned(), tris: tris })
 ));
 
 #[allow(dead_code)]

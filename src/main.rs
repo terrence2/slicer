@@ -23,8 +23,9 @@ mod stl;
 use bsp::BspTree;
 use mesh::Mesh;
 use std::fs::File;
+use std::thread;
 use stl::StlMesh;
-use errors::{Result, ResultExt};
+use errors::{Error, Result, ResultExt};
 
 quick_main!(run);
 fn run() -> Result<()> {
@@ -42,35 +43,14 @@ fn run() -> Result<()> {
         .unwrap()
         .collect::<Vec<&str>>();
 
-    // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
-    let mut merged: Option<BspTree> = None;
-    for (i, filename) in filenames.iter().enumerate() {
-        let mut fp = File::open(filename)
-            .chain_err(|| format!("failed to open source file: {}", filename))?;
+    let bsp = load_and_merge_meshes(filenames).chain_err(|| "Failed to load meshes")?;
 
-        println!("Loading STL from file: {}", filename);
-        let stl = StlMesh::from_file(&mut fp)
-            .chain_err(|| "failed to load stl file")?;
+    println!("Converting merged mesh to STL...");
+    let stl = bsp.convert_to_stl("slicer merge mesh");
 
-        println!("Creating BSP tree...");
-        let bsp = BspTree::new_from_stl(&stl, i as u8);
-
-        println!("Merging with existing mesh...");
-        if let Some(ref mut target) = merged {
-            target.union_with(bsp);
-        } else {
-            merged = Some(bsp);
-        }
-    }
-
-    if let Some(bsp) = merged {
-        println!("Converting merged mesh to STL...");
-        let stl = bsp.convert_to_stl("slicer merge mesh");
-
-        println!("Writing merged mesh to: a.stl");
-        let mut fp = File::create("a.stl").unwrap();
-        stl.to_binary_file(&mut fp).unwrap();
-    }
+    println!("Writing merged mesh to: a.stl");
+    let mut fp = File::create("a.stl").unwrap();
+    stl.to_binary_file(&mut fp).unwrap();
 
     // Union all meshes, preserving the face tags.
     //   Build a BSP of the first mesh and then union into it.
@@ -112,4 +92,54 @@ fn run() -> Result<()> {
     //println!("  Verts: {}", mesh.verts.len());
     //println!("  Norms: {}", mesh.normals.len());
     Ok(())
+}
+
+fn load_and_merge_meshes(filenames: Vec<&str>) -> Result<BspTree> {
+
+    // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
+    let mut handles = Vec::<thread::JoinHandle<Result<BspTree>>>::new();
+    for (i, filename) in filenames.into_iter().enumerate() {
+        println!("Loading STL from file: {}", filename);
+
+        // Note: we have to load a copy of the string into a stack slot here so that we
+        // can safely capture it in the child thread.
+        let owned_filename = filename.to_owned();
+
+        // BSP creation may use excessive amounts of stack space if we get unlucky,
+        // so we set a fairly enormous stack here. On the plus side, we're not going
+        // to be loading more than a handful of models in parallel.
+        // TODO: make the stack size configurable.
+        let handle = thread::Builder::new()
+            .name("BSP_loader".to_owned())
+            .stack_size(8 * 1024 * 1024 * 1024)
+            .spawn(move || { load_mesh(owned_filename, i as u8) })
+            .chain_err(|| "spawning a thread to load a BSP failed")?;
+        handles.push(handle);
+    }
+
+    let mut merged: Option<BspTree> = None;
+    for handle in handles {
+        let bsp = match handle.join() {
+            Err(e) => { return Err(*e.downcast::<Error>().unwrap()); },
+            Ok(m) => m.chain_err(|| "failed to join with child thread")?,
+        };
+        if let Some(ref mut target) = merged {
+            println!("merging {} into {}", bsp.name, target.name);
+            target.union_with(bsp);
+        } else {
+            merged = Some(bsp);
+        }
+    }
+
+    return Ok(merged.expect("no meshes to load should be handled by clap"));
+}
+
+fn load_mesh(filename: String, attr: u8) -> Result<BspTree> {
+    let mut fp = File::open(&filename)
+        .chain_err(|| format!("failed to open source file: {}", &filename))?;
+
+    let stl = StlMesh::from_file(&mut fp)
+        .chain_err(|| "failed to load stl file")?;
+
+    return Ok(BspTree::new_from_stl(&stl, attr));
 }

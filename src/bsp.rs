@@ -246,6 +246,7 @@ impl Triangle {
 }
 
 pub struct BspTree {
+    pub name: String,
     nodes: Vec<BspNode>,
 }
 
@@ -273,7 +274,7 @@ impl BspTree {
             p.set_attribute(attr);
             polygons.push(p);
         }
-        let mut bsp = Self::new();
+        let mut bsp = Self::new(&stl.name);
         bsp.get_root().add_polygons(polygons, &mut bsp);
         return bsp;
     }
@@ -295,8 +296,8 @@ impl BspTree {
         return StlMesh::from_tris(name, tris);
     }
 
-    pub fn new() -> Self {
-        let mut tree = BspTree { nodes: Vec::new() };
+    pub fn new(name: &str) -> Self {
+        let mut tree = BspTree { nodes: Vec::new(), name: name.to_owned() };
         tree.create_node();
         return tree;
     }
