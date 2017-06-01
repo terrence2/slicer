@@ -314,7 +314,10 @@ impl BspTree {
     }
 
     pub fn new(name: &str) -> Self {
-        let mut tree = BspTree { nodes: Vec::new(), name: name.to_owned() };
+        let mut tree = BspTree {
+            nodes: Vec::new(),
+            name: name.to_owned(),
+        };
         tree.create_node();
         return tree;
     }

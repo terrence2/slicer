@@ -39,6 +39,7 @@ mod mesh;
 mod stl;
 
 use bsp::BspTree;
+use merge::{merge_meshes, MergedMesh};
 use mesh::Mesh;
 use std::fs::File;
 use std::thread;
@@ -61,7 +62,13 @@ fn run() -> Result<()> {
         .unwrap()
         .collect::<Vec<&str>>();
 
-    let bsp = load_and_merge_meshes(filenames).chain_err(|| "Failed to load meshes")?;
+    /*
+    let stl = load_and_merge_meshes_smart(filenames.clone())
+        .chain_err(|| "Failed to load meshes")?;
+    */
+
+    let bsp = load_and_merge_meshes(filenames)
+        .chain_err(|| "Failed to load meshes")?;
 
     println!("Converting merged mesh to STL...");
     let stl = bsp.convert_to_stl("slicer merge mesh");
@@ -69,6 +76,7 @@ fn run() -> Result<()> {
     println!("Writing merged mesh to: a.stl");
     let mut fp = File::create("a.stl").unwrap();
     stl.to_binary_file(&mut fp).unwrap();
+
 
     // Union all meshes, preserving the face tags.
     //   Build a BSP of the first mesh and then union into it.
@@ -130,7 +138,7 @@ fn load_and_merge_meshes(filenames: Vec<&str>) -> Result<BspTree> {
         let handle = thread::Builder::new()
             .name("BSP_loader".to_owned())
             .stack_size(8 * 1024 * 1024 * 1024)
-            .spawn(move || { load_mesh(owned_filename, i as u8) })
+            .spawn(move || load_mesh(owned_filename, i as u8))
             .chain_err(|| "spawning a thread to load a BSP failed")?;
         handles.push(handle);
     }
@@ -138,7 +146,9 @@ fn load_and_merge_meshes(filenames: Vec<&str>) -> Result<BspTree> {
     let mut merged: Option<BspTree> = None;
     for handle in handles {
         let bsp = match handle.join() {
-            Err(e) => { return Err(*e.downcast::<Error>().unwrap()); },
+            Err(e) => {
+                return Err(*e.downcast::<Error>().unwrap());
+            }
             Ok(m) => m.chain_err(|| "failed to join with child thread")?,
         };
         if let Some(ref mut target) = merged {
@@ -160,4 +170,21 @@ fn load_mesh(filename: String, attr: u8) -> Result<BspTree> {
         .chain_err(|| "failed to load stl file")?;
 
     return Ok(BspTree::new_from_stl(&stl, attr));
+}
+
+fn load_and_merge_meshes_smart(filenames: Vec<&str>) -> Result<StlMesh> {
+
+    // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
+    let mut stl_meshes = Vec::new();
+    for (i, filename) in filenames.into_iter().enumerate() {
+        let mut fp = File::open(&filename)
+            .chain_err(|| format!("failed to open source file: {}", &filename))?;
+
+        let stl_mesh = StlMesh::from_file(&mut fp)
+            .chain_err(|| format!("failed to load stl mesh: {}", &filename))?;
+
+        stl_meshes.push(stl_mesh);
+    }
+
+    return Ok(merge_meshes(&stl_meshes));
 }
