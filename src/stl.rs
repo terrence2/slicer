@@ -32,27 +32,24 @@ use errors::{Result, ResultExt};
 pub struct StlTriangle {
     pub verts: [Point3<f32>; 3],
     pub normal: Point3<f32>,
-    pub color: [u8; 3], // 8-bit RGB format.
-    pub is_color_valid: bool,
+    pub color: Option<[u8; 3]>, // 8-bit RGB format.
 }
 impl StlTriangle {
     pub fn new(v0: Point3<f32>, v1: Point3<f32>, v2: Point3<f32>, norm: Point3<f32>) -> Self {
         StlTriangle {
             verts: [v0, v1, v2],
             normal: norm,
-            color: [0, 0, 0],
-            is_color_valid: false,
+            color: None,
         }
     }
 
     pub fn set_color(&mut self, r: u8, g: u8, b: u8) {
-        self.color = [r, g, b];
-        self.is_color_valid = true;
+        self.color = Some([r, g, b]);
     }
 
     #[allow(dead_code)]
     pub fn clear_color(&mut self) {
-        self.is_color_valid = false;
+        self.color = None;
     }
 }
 
@@ -220,11 +217,11 @@ impl StlMesh {
                         .chain_err(|| "format vert")?;
                 }
             }
-            if tri.is_color_valid {
+            if let Some(color) = tri.color {
                 // Convert to 15-bit BGR format and set the "valid" bit.
-                let r: u16 = tri.color[0] as u16 >> 3;
-                let g: u16 = tri.color[1] as u16 >> 3;
-                let b: u16 = tri.color[2] as u16 >> 3;
+                let r: u16 = color[0] as u16 >> 3;
+                let g: u16 = color[1] as u16 >> 3;
+                let b: u16 = color[2] as u16 >> 3;
                 let clr = (1 << 15) | (r << 10) | (g << 5) | b;
                 buf.write_u16::<LittleEndian>(clr)
                     .chain_err(|| "format attr")?;
