@@ -21,6 +21,7 @@ extern crate approx;
 extern crate byteorder;
 #[macro_use]
 extern crate clap;
+extern crate cpuprofiler;
 #[macro_use]
 extern crate error_chain;
 #[macro_use]
@@ -39,6 +40,7 @@ mod mesh;
 mod stl;
 
 use bsp::BspTree;
+use cpuprofiler::PROFILER;
 use merge::{merge_meshes, MergedMesh};
 use mesh::Mesh;
 use std::fs::File;
@@ -143,6 +145,7 @@ fn load_and_merge_meshes(filenames: Vec<&str>) -> Result<BspTree> {
         handles.push(handle);
     }
 
+    PROFILER.lock().unwrap().start("./foo.profile").expect("couldn't start");
     let mut merged: Option<BspTree> = None;
     for handle in handles {
         let bsp = match handle.join() {
@@ -158,6 +161,7 @@ fn load_and_merge_meshes(filenames: Vec<&str>) -> Result<BspTree> {
             merged = Some(bsp);
         }
     }
+    PROFILER.lock().unwrap().stop().expect("couldn't stop");
 
     return Ok(merged.expect("no meshes to load should be handled by clap"));
 }

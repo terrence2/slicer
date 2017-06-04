@@ -44,8 +44,6 @@ pub struct Plane {
 pub struct PlaneSplitResult {
     coplanar_front: Vec<Triangle>,
     coplanar_back: Vec<Triangle>,
-    front: Vec<Triangle>,
-    back: Vec<Triangle>,
 }
 
 // Bit flags for tracking orientation.
@@ -80,12 +78,10 @@ impl Plane {
         self.d = -self.d;
     }
 
-    pub fn split_polygon(&self, triangle: Triangle, known_coplanar: bool) -> PlaneSplitResult {
+    pub fn split_polygon(&self, triangle: Triangle, known_coplanar: bool, front: &mut Vec<Triangle>, back: &mut Vec<Triangle>) -> PlaneSplitResult {
         let mut result = PlaneSplitResult {
             coplanar_front: Vec::new(),
             coplanar_back: Vec::new(),
-            front: Vec::new(),
-            back: Vec::new(),
         };
 
         if known_coplanar {
@@ -121,16 +117,16 @@ impl Plane {
                 }
             }
             FRONT => {
-                result.front.push(triangle);
+                front.push(triangle);
             }
             BACK => {
-                result.back.push(triangle);
+                back.push(triangle);
             }
             SPANNING => {
                 self.split_spanning_polygon(vertex_types,
                                             triangle,
-                                            &mut result.front,
-                                            &mut result.back);
+                                            front,
+                                            back);
             }
             _ => panic!("impossible polygon type when splitting"),
         }
@@ -332,11 +328,17 @@ impl BspTree {
     }
 
     pub fn union_with(&mut self, mut other: BspTree) {
+        println!("Clipping self to other");
         self.clip_to(&mut other);
+        println!("Clipping other to self");
         other.clip_to(self);
+        println!("Inverting other");
         other.invert();
+        println!("Clipping inverted other to self.");
         other.clip_to(self);
+        println!("De-inverting other.");
         other.invert();
+        println!("Adding polygons from other to self.");
         self.get_root().add_polygons(other.get_polygons(), self);
     }
 
@@ -426,9 +428,7 @@ impl BspNodeId {
 
             let plane: &Plane = self_borrow.plane.as_ref().expect("not none");
             for (i, poly) in polygons.drain(..).enumerate() {
-                let mut result = plane.split_polygon(poly, split_plane_index == Some(i));
-                front.append(&mut result.front);
-                back.append(&mut result.back);
+                let mut result = plane.split_polygon(poly, split_plane_index == Some(i), &mut front, &mut back);
                 self_borrow.polygons.append(&mut result.coplanar_front);
                 self_borrow.polygons.append(&mut result.coplanar_back);
             }
@@ -501,10 +501,8 @@ impl BspNodeId {
                     .plane
                     .as_ref()
                     .expect("not none")
-                    .split_polygon(polygon, false);
-                front.append(&mut result.front);
+                    .split_polygon(polygon, false, &mut front, &mut back);
                 front.append(&mut result.coplanar_front);
-                back.append(&mut result.back);
                 back.append(&mut result.coplanar_back);
             }
         }
