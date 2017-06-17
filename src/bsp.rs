@@ -42,8 +42,8 @@ pub struct Plane {
 
 #[derive(Debug)]
 pub struct PlaneSplitResult {
-    coplanar_front: Vec<Triangle>,
-    coplanar_back: Vec<Triangle>,
+    coplanar_front: Option<Triangle>,
+    coplanar_back: Option<Triangle>,
 }
 
 // Bit flags for tracking orientation.
@@ -80,15 +80,15 @@ impl Plane {
 
     pub fn split_polygon(&self, triangle: Triangle, known_coplanar: bool, front: &mut Vec<Triangle>, back: &mut Vec<Triangle>) -> PlaneSplitResult {
         let mut result = PlaneSplitResult {
-            coplanar_front: Vec::new(),
-            coplanar_back: Vec::new(),
+            coplanar_front: None,
+            coplanar_back: None,
         };
 
         if known_coplanar {
             if self.normal.dot(&triangle.plane.normal) > 0f32 {
-                result.coplanar_front.push(triangle);
+                result.coplanar_front = Some(triangle);
             } else {
-                result.coplanar_back.push(triangle);
+                result.coplanar_back = Some(triangle);
             }
             return result;
         }
@@ -111,9 +111,9 @@ impl Plane {
         match triangle_type {
             COPLANAR => {
                 if self.normal.dot(&triangle.plane.normal) > 0f32 {
-                    result.coplanar_front.push(triangle);
+                    result.coplanar_front = Some(triangle);
                 } else {
-                    result.coplanar_back.push(triangle);
+                    result.coplanar_back = Some(triangle);
                 }
             }
             FRONT => {
@@ -292,9 +292,9 @@ impl BspTree {
         return bsp;
     }
 
-    pub fn convert_to_stl(&self, name: &str) -> StlMesh {
+    pub fn convert_to_stl(&mut self, name: &str) -> StlMesh {
         let mut tris: Vec<StlTriangle> = Vec::new();
-        for t in self.get_polygons() {
+        for t in self.convert_to_polygons() {
             let mut u = StlTriangle::new(t.vertices[0].position,
                                          t.vertices[1].position,
                                          t.vertices[2].position,
@@ -306,6 +306,7 @@ impl BspTree {
             }
             tris.push(u);
         }
+        println!("Tris count is: {}", tris.len());
         return StlMesh::from_tris(name, tris);
     }
 
@@ -338,13 +339,24 @@ impl BspTree {
         other.clip_to(self);
         println!("De-inverting other.");
         other.invert();
-        println!("Adding polygons from other to self.");
-        self.get_root().add_polygons(other.get_polygons(), self);
+        println!("Converting other to raw tris.");
+        let mut other_tris = other.convert_to_polygons();
+        println!("Converting self to raw tris.");
+        let mut self_tris = self.convert_to_polygons();
+        println!("Merging polygon lists.");
+        self_tris.append(&mut other_tris);
+        other_tris.truncate(0);
+        println!("Rebuilding ourself with both tris sets: {} total tris.", self_tris.len());
+        self.create_node();
+        self.get_root().add_polygons(self_tris, self);
+        println!("Done with union!")
     }
 
-    pub fn get_polygons(&self) -> Vec<Triangle> {
+    /// Returns all of the polys in the bsp and leaves an empty bsp behind.
+    pub fn convert_to_polygons(&mut self) -> Vec<Triangle> {
         let mut out = Vec::new();
-        self.get_root().get_polygons(&mut out, self);
+        self.get_root().steal_polygons(&mut out, self);
+        self.nodes.truncate(0);
         return out;
     }
 
@@ -366,19 +378,19 @@ impl BspTree {
 }
 
 impl BspNodeId {
-    pub fn get_polygons(&self, polygons: &mut Vec<Triangle>, arena: &BspTree) {
+    pub fn steal_polygons(&self, polygons: &mut Vec<Triangle>, arena: &mut BspTree) {
         {
-            let self_borrow = arena.nodes.get(self.index).expect("unknown id");
-            let mut tmp = self_borrow.polygons.clone();
-            polygons.append(&mut tmp);
+            let mut self_borrow = arena.nodes.get_mut(self.index).expect("unknown id");
+            polygons.append(&mut self_borrow.polygons);
+            self_borrow.polygons.truncate(0);
         }
 
         let (front_nodeid_opt, back_nodeid_opt) = self.get_front_and_back(arena);
         if let Some(front_nodeid) = front_nodeid_opt {
-            front_nodeid.get_polygons(polygons, arena);
+            front_nodeid.steal_polygons(polygons, arena);
         }
         if let Some(back_nodeid) = back_nodeid_opt {
-            back_nodeid.get_polygons(polygons, arena);
+            back_nodeid.steal_polygons(polygons, arena);
         }
     }
 
@@ -429,8 +441,8 @@ impl BspNodeId {
             let plane: &Plane = self_borrow.plane.as_ref().expect("not none");
             for (i, poly) in polygons.drain(..).enumerate() {
                 let mut result = plane.split_polygon(poly, split_plane_index == Some(i), &mut front, &mut back);
-                self_borrow.polygons.append(&mut result.coplanar_front);
-                self_borrow.polygons.append(&mut result.coplanar_back);
+                if let Some(tri) = result.coplanar_front { self_borrow.polygons.push(tri); }
+                if let Some(tri) = result.coplanar_back { self_borrow.polygons.push(tri); }
             }
         }
 
@@ -502,8 +514,8 @@ impl BspNodeId {
                     .as_ref()
                     .expect("not none")
                     .split_polygon(polygon, false, &mut front, &mut back);
-                front.append(&mut result.coplanar_front);
-                back.append(&mut result.coplanar_back);
+                if let Some(tri) = result.coplanar_front { front.push(tri); }
+                if let Some(tri) = result.coplanar_back { back.push(tri); }
             }
         }
 
@@ -559,19 +571,21 @@ mod test {
                                          &Point3::new(0f32, 1f32, 0f32),
                                          0)
                 .unwrap();
-        let result = plane.split_polygon(poly, false);
-        assert_eq!(result.front.len(), 1);
-        assert_eq!(result.front[0].vertices.len(), 3);
-        assert_eq!(result.back.len(), 1);
-        assert_eq!(result.back[0].vertices.len(), 3);
-        assert_eq!(result.coplanar_front.len(), 0);
-        assert_eq!(result.coplanar_back.len(), 0);
-        assert!(result.front[0].vertices[0].position == Point3::new(0f32, 0f32, 0f32));
-        assert!(result.front[0].vertices[1].position == Point3::new(0f32, 0f32, 1f32));
-        assert!(result.front[0].vertices[2].position == Point3::new(0f32, 1f32, 0f32));
-        assert!(result.back[0].vertices[0].position == Point3::new(0f32, 0f32, -1f32));
-        assert!(result.back[0].vertices[1].position == Point3::new(0f32, 0f32, 0f32));
-        assert!(result.back[0].vertices[2].position == Point3::new(0f32, 1f32, 0f32));
+        let mut front = Vec::new();
+        let mut back = Vec::new();
+        let result = plane.split_polygon(poly, false, &mut front, &mut back);
+        assert_eq!(front.len(), 1);
+        assert_eq!(front[0].vertices.len(), 3);
+        assert_eq!(back.len(), 1);
+        assert_eq!(back[0].vertices.len(), 3);
+        assert!(result.coplanar_front.is_none());
+        assert!(result.coplanar_back.is_none());
+        assert!(front[0].vertices[0].position == Point3::new(0f32, 0f32, 0f32));
+        assert!(front[0].vertices[1].position == Point3::new(0f32, 0f32, 1f32));
+        assert!(front[0].vertices[2].position == Point3::new(0f32, 1f32, 0f32));
+        assert!(back[0].vertices[0].position == Point3::new(0f32, 0f32, -1f32));
+        assert!(back[0].vertices[1].position == Point3::new(0f32, 0f32, 0f32));
+        assert!(back[0].vertices[2].position == Point3::new(0f32, 1f32, 0f32));
     }
 
     #[test]
@@ -584,15 +598,17 @@ mod test {
                                          &Point3::new(0f32, 1f32, 0f32),
                                          0)
                 .unwrap();
-        let result = plane.split_polygon(poly, false);
-        assert_eq!(result.front.len(), 0);
-        assert_eq!(result.back.len(), 0);
-        assert_eq!(result.coplanar_front.len(), 1);
-        assert_eq!(result.coplanar_front[0].vertices.len(), 3);
-        assert_eq!(result.coplanar_back.len(), 0);
-        assert!(result.coplanar_front[0].vertices[0].position == Point3::new(0f32, 0f32, 0f32));
-        assert!(result.coplanar_front[0].vertices[1].position == Point3::new(1f32, 0f32, 0f32));
-        assert!(result.coplanar_front[0].vertices[2].position == Point3::new(0f32, 1f32, 0f32));
+        let mut front = Vec::new();
+        let mut back = Vec::new();
+        let result = plane.split_polygon(poly, false, &mut front, &mut back);
+        assert_eq!(front.len(), 0);
+        assert_eq!(back.len(), 0);
+        assert!(result.coplanar_back.is_none());
+        let cp = result.coplanar_front.unwrap();
+        assert_eq!(cp.vertices.len(), 3);
+        assert!(cp.vertices[0].position == Point3::new(0f32, 0f32, 0f32));
+        assert!(cp.vertices[1].position == Point3::new(1f32, 0f32, 0f32));
+        assert!(cp.vertices[2].position == Point3::new(0f32, 1f32, 0f32));
     }
 
     #[test]
@@ -605,15 +621,17 @@ mod test {
                                          &Point3::new(0f32, 0f32, 0f32),
                                          0)
                 .unwrap();
-        let result = plane.split_polygon(poly, false);
-        assert_eq!(result.front.len(), 0);
-        assert_eq!(result.back.len(), 0);
-        assert_eq!(result.coplanar_front.len(), 0);
-        assert_eq!(result.coplanar_back.len(), 1);
-        assert_eq!(result.coplanar_back[0].vertices.len(), 3);
-        assert!(result.coplanar_back[0].vertices[0].position == Point3::new(0f32, 1f32, 0f32));
-        assert!(result.coplanar_back[0].vertices[1].position == Point3::new(1f32, 0f32, 0f32));
-        assert!(result.coplanar_back[0].vertices[2].position == Point3::new(0f32, 0f32, 0f32));
+        let mut front = Vec::new();
+        let mut back = Vec::new();
+        let result = plane.split_polygon(poly, false, &mut front, &mut back);
+        assert_eq!(front.len(), 0);
+        assert_eq!(back.len(), 0);
+        assert!(result.coplanar_front.is_none());
+        let cp = result.coplanar_back.unwrap();
+        assert_eq!(cp.vertices.len(), 3);
+        assert!(cp.vertices[0].position == Point3::new(0f32, 1f32, 0f32));
+        assert!(cp.vertices[1].position == Point3::new(1f32, 0f32, 0f32));
+        assert!(cp.vertices[2].position == Point3::new(0f32, 0f32, 0f32));
     }
 
     use std::fs::File;
@@ -646,15 +664,15 @@ mod test {
         stl.to_binary_file(&mut fp).unwrap();
     }
 
-    fn save_bsp(bsp: &BspTree, name: &str) {
-        let polys = bsp.get_polygons();
+    fn save_bsp(bsp: &mut BspTree, name: &str) {
+        let polys = bsp.convert_to_polygons();
         save_polygons(&polys, name);
     }
 
     #[test]
     fn test_bsp_create() {
-        let bsp = BspTree::new_from_stl(&load_cube_text(), 1);
-        save_bsp(&bsp, "test_bsp_create");
+        let mut bsp = BspTree::new_from_stl(&load_cube_text(), 1);
+        save_bsp(&mut bsp, "test_bsp_create");
     }
 
     #[test]
@@ -679,7 +697,7 @@ mod test {
 
         bsp.clip_to(&mut bsp_offset);
 
-        save_bsp(&bsp, "test_bsp_clip_to");
+        save_bsp(&mut bsp, "test_bsp_clip_to");
     }
 
     #[test]
@@ -705,7 +723,7 @@ mod test {
         bsp_offset.invert();
         bsp.clip_to(&mut bsp_offset);
 
-        save_bsp(&bsp, "test_bsp_invert_clip_to");
+        save_bsp(&mut bsp, "test_bsp_invert_clip_to");
     }
 
     #[test]
@@ -730,6 +748,6 @@ mod test {
         bsp1.get_root().add_polygons(polygons0, &mut bsp1);
 
         bsp0.union_with(bsp1);
-        save_bsp(&bsp0, "test_bsp_union");
+        save_bsp(&mut bsp0, "test_bsp_union");
     }
 }

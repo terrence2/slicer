@@ -15,8 +15,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#![allow(dead_code)]
-
 mod errors {
     error_chain!{}
 }
@@ -53,6 +51,10 @@ pub struct Mesh {
     pub tris: Vec<Triangle>,
 }
 
+fn relative_eq(p0: &Point3<f32>, p1: &Point3<f32>) -> bool {
+    return relative_eq!(p0.x, p1.x) && relative_eq!(p0.y, p1.y) && relative_eq!(p0.z, p1.z);
+}
+
 fn push_unique_point(points: &mut Vec<Point3<f32>>, point: Point3<f32>) -> u32 {
     for (i, p) in points.iter().enumerate() {
         if relative_eq(p, &point) {
@@ -61,10 +63,6 @@ fn push_unique_point(points: &mut Vec<Point3<f32>>, point: Point3<f32>) -> u32 {
     }
     points.push(point);
     return (points.len() as u32) - 1u32;
-}
-
-fn relative_eq(p0: &Point3<f32>, p1: &Point3<f32>) -> bool {
-    return relative_eq!(p0.x, p1.x) && relative_eq!(p0.y, p1.y) && relative_eq!(p0.z, p1.z);
 }
 
 impl Mesh {

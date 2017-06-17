@@ -15,6 +15,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+extern crate nalgebra;
 extern crate alga;
 #[macro_use]
 extern crate approx;
@@ -28,7 +29,6 @@ extern crate error_chain;
 extern crate itertools;
 #[macro_use]
 extern crate nom;
-extern crate nalgebra;
 
 mod errors {
     error_chain!{}
@@ -37,16 +37,17 @@ mod bsp;
 mod geometry;
 mod merge;
 mod mesh;
+mod ssp;
 mod stl;
 
 use bsp::BspTree;
 use cpuprofiler::PROFILER;
-use merge::{merge_meshes, MergedMesh};
 use mesh::Mesh;
 use std::fs::File;
 use std::thread;
 use stl::StlMesh;
 use errors::{Error, Result, ResultExt};
+use ssp::{SSP, SliceSettings};
 
 quick_main!(run);
 fn run() -> Result<()> {
@@ -69,11 +70,11 @@ fn run() -> Result<()> {
         .chain_err(|| "Failed to load meshes")?;
     */
 
-    let bsp = load_and_merge_meshes(filenames)
+    let mut ssp = load_and_merge_meshes_smart(filenames)
         .chain_err(|| "Failed to load meshes")?;
 
     println!("Converting merged mesh to STL...");
-    let stl = bsp.convert_to_stl("slicer merge mesh");
+    let stl = ssp.convert_to_stl("slicer merge mesh");
 
     println!("Writing merged mesh to: a.stl");
     let mut fp = File::create("a.stl").unwrap();
@@ -176,10 +177,10 @@ fn load_mesh(filename: String, attr: u8) -> Result<BspTree> {
     return Ok(BspTree::new_from_stl(&stl, attr));
 }
 
-fn load_and_merge_meshes_smart(filenames: Vec<&str>) -> Result<StlMesh> {
+fn load_and_merge_meshes_smart(filenames: Vec<&str>) -> Result<SSP> {
 
     // Load all meshes, tagging faces from each mesh with the offset: i.e. the extruder number.
-    let mut stl_meshes = Vec::new();
+    let mut meshes = Vec::new();
     for (i, filename) in filenames.into_iter().enumerate() {
         let mut fp = File::open(&filename)
             .chain_err(|| format!("failed to open source file: {}", &filename))?;
@@ -187,8 +188,12 @@ fn load_and_merge_meshes_smart(filenames: Vec<&str>) -> Result<StlMesh> {
         let stl_mesh = StlMesh::from_file(&mut fp)
             .chain_err(|| format!("failed to load stl mesh: {}", &filename))?;
 
-        stl_meshes.push(stl_mesh);
+        meshes.push(stl_mesh);
     }
 
-    return Ok(merge_meshes(&stl_meshes));
+    let ssp = SSP::new(meshes, SliceSettings::new());
+
+    return Ok(ssp);
+    //return bail!("not implemented yet");
+    //return Ok(merge_meshes(&meshes));
 }
